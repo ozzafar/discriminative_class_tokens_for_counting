@@ -68,6 +68,12 @@ def prepare_classifier(config):
         model = CustomViTForImageClassification.from_pretrained(
             "vesteinn/vit-mae-inat21"
         ).cuda()
+    elif config.classifier == "clip-count":
+        from clip_count.run import Model
+
+        model = Model.load_from_checkpoint(
+            "clipcount_pretrained.ckpt"
+        ).cuda()
 
     return model
 

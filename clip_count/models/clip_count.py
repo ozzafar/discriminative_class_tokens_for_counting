@@ -5,9 +5,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.models_crossvit import CrossAttentionBlock, ConvCrossAttentionBlock
+from clip_count.models.models_crossvit import CrossAttentionBlock, ConvCrossAttentionBlock
 
-from util.pos_embed import get_2d_sincos_pos_embed, positional_encoding_1d
+from clip_count.util.pos_embed import get_2d_sincos_pos_embed, positional_encoding_1d
 import clip
 from torchvision import transforms
 import einops

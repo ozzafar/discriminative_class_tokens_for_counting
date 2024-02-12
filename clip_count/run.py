@@ -15,24 +15,24 @@ import random
 from pathlib import Path
 import math
 from PIL import Image
-from models.contrastive_loss import ContrastiveLoss
+from clip_count.models.contrastive_loss import ContrastiveLoss
 import torch
 import torch.nn.functional as F
 from typing import List, Dict, Any
 
 
-import util.misc as misc
-from util.FSC147 import  FSC147
-from util.CARPK import CARPK
-from util.ShanghaiTech import ShanghaiTech
-from models import  clip_count
+import clip_count.util.misc as misc
+from clip_count.util.FSC147 import  FSC147
+from clip_count.util.CARPK import CARPK
+from clip_count.util.ShanghaiTech import ShanghaiTech
+from clip_count.models import  clip_count
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, seed_everything
 import einops
 import cv2 
 import gradio as gr
 import torchvision.transforms.functional as TF
-from util.constant import SCALE_FACTOR
+from clip_count.util.constant import SCALE_FACTOR
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = '1'
 

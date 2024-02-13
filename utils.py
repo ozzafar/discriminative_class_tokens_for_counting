@@ -68,6 +68,11 @@ def prepare_classifier(config):
         model = CustomViTForImageClassification.from_pretrained(
             "vesteinn/vit-mae-inat21"
         ).cuda()
+    elif config.classifier == "clip":
+        from transformers import CLIPProcessor, CLIPModel
+
+        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32"
+        ).cuda()
     elif config.classifier == "clip-count":
         from clip_count.run import Model
 

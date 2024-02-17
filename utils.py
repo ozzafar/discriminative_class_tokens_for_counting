@@ -69,7 +69,7 @@ def prepare_classifier(config):
             "vesteinn/vit-mae-inat21"
         ).cuda()
     elif config.classifier == "clip":
-        from transformers import CLIPProcessor, CLIPModel
+        from transformers import CLIPModel
 
         model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32"
         ).cuda()

@@ -474,7 +474,7 @@ def window_composite(patches, window_size = (384, 384), stride = 128):
     patch_h, patch_w = window_size
     for i, patch in enumerate(patches):
         if i == 0:
-            image = patch
+            image = patch.clone()
             # cv2.imwrite(f"debug/out/patch{i}.jpg", patch)
             # cv2.imwrite(f"debug/out/image{i}.jpg", image)
 

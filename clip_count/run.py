@@ -25,7 +25,7 @@ import clip_count.util.misc as misc
 from clip_count.util.FSC147 import  FSC147
 from clip_count.util.CARPK import CARPK
 from clip_count.util.ShanghaiTech import ShanghaiTech
-from clip_count.models import  clip_count
+from clip_count.models import  clip_count_model
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, seed_everything
 import einops
@@ -129,7 +129,7 @@ class Model(LightningModule):
         self.all_classes = all_classes
 
         self.save_hyperparameters(args)
-        self.model = clip_count.CLIPCount(
+        self.model = clip_count_model.CLIPCount(
                         fim_depth=self.args.decoder_depth,
                         fim_num_heads=self.args.decoder_head,
                         use_coop=self.args.use_coop, 

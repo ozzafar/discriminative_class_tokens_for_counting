@@ -79,6 +79,7 @@ def prepare_classifier(config):
         model = Model.load_from_checkpoint(
             "clipcount_pretrained.ckpt"
         ,strict=False).cuda()
+        model.eval()
 
     return model
 

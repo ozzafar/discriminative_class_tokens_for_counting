@@ -41,11 +41,11 @@ def transform_img_tensor(image, config):
     if config.classifier == "inet":
         image = kornia.geometry.transform.resize(image, 256, interpolation="bicubic")
         image = kornia.geometry.transform.center_crop(image, (224, 224))
-        image = T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])(image)
+        # image = T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])(image)
     else:
         image = kornia.geometry.transform.resize(image, 224, interpolation="bicubic")
         image = kornia.geometry.transform.center_crop(image, (224, 224))
-        image = T.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)(image)
+        # image = T.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)(image)
     return image
 
 

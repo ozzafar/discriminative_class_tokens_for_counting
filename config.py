@@ -25,7 +25,7 @@ class RunConfig:
     # affect variability of the training images
     # i.e., also sets batch size with accumulation
     epoch_size: int = 5
-    number_of_prompts: int = 3  # how many different prompts to use
+    number_of_prompts: int = 2  # how many different prompts to use
     batch_size: int = 1  # set to one due to gpu constraints
     gradient_accumulation_steps: int = 5  # same as the epoch size
 

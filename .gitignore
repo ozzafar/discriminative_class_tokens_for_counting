@@ -5,3 +5,4 @@ pipeline_token/
 sd-concept-output/
 token/
 /clipcount_pretrained.ckpt
+/discrimnative_tokens_for_ocr.ipynb

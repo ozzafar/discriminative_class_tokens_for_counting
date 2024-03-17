@@ -25,7 +25,7 @@ def train(config: RunConfig):
     current_early_stopping = RunConfig.early_stopping
 
     exp_identifier = (
-        f'{config.exp_id}_{"2.1" if config.sd_2_1 else "1.4"}_{config.epoch_size}_{config.lr}_'
+        f'{"2.1" if config.sd_2_1 else "1.4"}_{config.epoch_size}_{config.lr}_'
         f"{config.seed}_{config.number_of_prompts}_{config.early_stopping}_{config.num_of_SD_backpropagation_steps}"
     )
 
@@ -43,7 +43,7 @@ def train(config: RunConfig):
     unet, vae, text_encoder, scheduler, tokenizer = utils.prepare_stable(config)
 
     #  Extend tokenizer and add a discriminative token ###
-    class_infer = config.class_index - 1
+    class_infer = int(class_name.split()[0])
     prompt_suffix = " ".join(class_name.lower().split("_"))
 
     ## Add the placeholder token in tokenizer
@@ -227,7 +227,7 @@ def train(config: RunConfig):
 
                     latents = init_latent
                     scheduler.set_timesteps(config.num_of_SD_inference_steps)
-                    grad_update_step = config.num_of_SD_inference_steps - 1
+                    grad_update_step = config.num_of_SD_inference_steps - config.num_of_SD_backpropagation_steps
 
                     # generate image
                     for i, t in enumerate(scheduler.timesteps):

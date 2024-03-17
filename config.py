@@ -13,21 +13,23 @@ class RunConfig:
     exp_id: str = "demo"
 
     # Whether to use Stable Diffusion v2.1
-    sd_2_1: bool = True
+    sd_2_1: bool = False
 
     # the classifier (Options: inet (ImageNet), inat (iNaturalist), cub (CUB200))
-    classifier: str = "inet"
+    classifier: str = "clip-count"
+
+    _lambda: float = 1  # @param {type:"number"}
 
     # Affect training time
     early_stopping: int = 15
-    num_train_epochs: int = 50
+    num_train_epochs: int = 100
 
     # affect variability of the training images
     # i.e., also sets batch size with accumulation
-    epoch_size: int = 5
-    number_of_prompts: int = 2  # how many different prompts to use
+    epoch_size: int = 1
+    number_of_prompts: int = 1  # how many different prompts to use
     batch_size: int = 1  # set to one due to gpu constraints
-    gradient_accumulation_steps: int = 5  # same as the epoch size
+    gradient_accumulation_steps: int = 1  # same as the epoch size
 
     # Skip if there exists a token checkpoint
     skip_exists: bool = False
@@ -44,7 +46,8 @@ class RunConfig:
     guidance_scale: int = 7
     height: int = 512
     width: int = 512
-    num_of_SD_inference_steps: int = 30
+    num_of_SD_inference_steps: int = 35
+    num_of_SD_backpropagation_steps: int = 1
 
     # Discrimnative tokens
     placeholder_token: str = "newclas"
@@ -56,7 +59,7 @@ class RunConfig:
 
     # Cuda related
     device: str = "cuda"
-    mixed_precision = "fp16"
+    mixed_precision = "no"
     gradient_checkpointing = True
 
     # evaluate

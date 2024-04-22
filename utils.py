@@ -12,6 +12,7 @@ import torch
 
 import kornia
 
+from InstaFlow.code.pipeline_rf import RectifiedFlowPipeline
 
 # From timm.data.constants
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
@@ -43,7 +44,8 @@ def transform_img_tensor(image, config):
         image = kornia.geometry.transform.center_crop(image, (224, 224))
         # image = T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])(image)
     else:
-        image = kornia.geometry.transform.resize(image, 224, interpolation="bicubic")
+        # image = kornia.geometry.transform.resize(image, 224, interpolation="bicubic")
+        image = kornia.geometry.transform.resize(image, 224)
         image = kornia.geometry.transform.center_crop(image, (224, 224))
         # image = T.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)(image)
     return image
@@ -85,10 +87,7 @@ def prepare_classifier(config):
 
 def prepare_stable(config):
     # Generative model
-    if config.sd_2_1:
-        pretrained_model_name_or_path = "stabilityai/stable-diffusion-2-1-base"
-    else:
-        pretrained_model_name_or_path = "CompVis/stable-diffusion-v1-4"
+    pretrained_model_name_or_path = "XCLIU/instaflow_0_9B_from_sd_1_5"
 
     unet = UNet2DConditionModel.from_pretrained(
         pretrained_model_name_or_path, subfolder="unet"
@@ -97,8 +96,8 @@ def prepare_stable(config):
         pretrained_model_name_or_path, subfolder="text_encoder"
     )
     vae = AutoencoderKL.from_pretrained(pretrained_model_name_or_path, subfolder="vae")
-    pipe = StableDiffusionPipeline.from_pretrained(pretrained_model_name_or_path).to(
-        "cuda"
+    pipe = RectifiedFlowPipeline.from_pretrained(pretrained_model_name_or_path).to(
+            "cuda"
     )
     scheduler = pipe.scheduler
     del pipe

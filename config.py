@@ -12,13 +12,11 @@ class RunConfig:
     # Id of the experiment
     exp_id: str = "demo"
 
-    # Whether to use Stable Diffusion v2.1
-    sd_2_1: bool = False
-
     # the classifier (Options: inet (ImageNet), inat (iNaturalist), cub (CUB200))
     classifier: str = "clip-count"
 
     _lambda: float = 1  # @param {type:"number"}
+    scale: float = 70  # 80  #@param {type:"number"}
 
     # Affect training time
     early_stopping: int = 15
@@ -35,7 +33,7 @@ class RunConfig:
     skip_exists: bool = False
 
     # Train and Optimization
-    lr: float = 0.00025 * epoch_size
+    lr: float = 0.00125
     betas: tuple = field(default_factory=lambda: (0.9, 0.999))
     weight_decay: float = 1e-2
     eps: float = 1e-08

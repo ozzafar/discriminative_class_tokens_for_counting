@@ -4,12 +4,19 @@ import os
 from pathlib import Path
 import torch.utils.checkpoint
 import itertools
+
+from IPython.core.display_functions import display
 from accelerate import Accelerator
 from diffusers import StableDiffusionPipeline
+from torch import device
 from transformers import CLIPProcessor, CLIPModel
 
 import prompt_dataset
 import utils
+from InstaFlow.code.pipeline_rf import RectifiedFlowPipeline
+import numpy as np
+import cv2
+import torchvision.transforms.functional as TF
 
 from config import RunConfig
 import pyrallis
@@ -25,14 +32,14 @@ def train(config: RunConfig):
     current_early_stopping = RunConfig.early_stopping
 
     exp_identifier = (
-        f'{"2.1" if config.sd_2_1 else "1.4"}_{config.epoch_size}_{config.lr}_'
+        f'{config.epoch_size}_{config.lr}_'
         f"{config.seed}_{config.number_of_prompts}_{config.early_stopping}_{config.num_of_SD_backpropagation_steps}"
     )
 
     #### Train ####
     print(f"Start experiment {exp_identifier}")
 
-    class_name = "7 oranges"
+    class_name = "15 oranges"
     print(f"Start training class token for {class_name}")
     img_dir_path = f"img/{class_name}/train"
     if Path(img_dir_path).exists():
@@ -126,7 +133,7 @@ def train(config: RunConfig):
         weight_decay=config.weight_decay,
         eps=config.eps,
     )
-    criterion = torch.nn.MSELoss().cuda()  # TODO ozzafar torch.nn.L1Loss?
+    criterion = torch.nn.MSELoss().cuda()
 
     accelerator = Accelerator(
         gradient_accumulation_steps=config.gradient_accumulation_steps,
@@ -185,130 +192,50 @@ def train(config: RunConfig):
                 device=config.device
             )  # Seed generator to create the inital latent noise
             generator.manual_seed(config.seed)
-            correct = 0
             for step, batch in enumerate(train_dataloader):
                 # setting the generator here means we update the same images
                 classification_loss = None
                 with accelerator.accumulate(text_encoder):
-                    # Get the text embedding for conditioning
-                    encoder_hidden_states = text_encoder(batch["input_ids"])[0]
 
-                    # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-                    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
-                    # corresponds to doing no classifier free guidance.
-                    do_classifier_free_guidance = config.guidance_scale > 1.0
-
-                    # get unconditional embeddings for classifier free guidance
-                    if do_classifier_free_guidance:
-                        max_length = batch["input_ids"].shape[-1]
-                        uncond_input = tokenizer(
-                            [""] * config.batch_size,
-                            padding="max_length",
-                            max_length=max_length,
-                            return_tensors="pt",
-                        )
-                        uncond_embeddings = text_encoder(
-                            uncond_input.input_ids.to(config.device)
-                        )[0]
-
-                        # For classifier free guidance, we need to do two forward passes.
-                        # Here we concatenate the unconditional and text embeddings into
-                        # a single batch to avoid doing two forward passes.
-                        encoder_hidden_states = torch.cat(
-                            [uncond_embeddings, encoder_hidden_states]
-                        )
-                    encoder_hidden_states = encoder_hidden_states.to(
-                        dtype=weight_dtype
-                    )
-                    generator.manual_seed(config.seed)
-                    init_latent = torch.randn(
-                        latents_shape, generator=generator, device="cuda"
-                    ).to(dtype=weight_dtype)
-
-                    latents = init_latent
-                    scheduler.set_timesteps(config.num_of_SD_inference_steps)
-                    grad_update_step = config.num_of_SD_inference_steps - config.num_of_SD_backpropagation_steps
+                    pipeline = RectifiedFlowPipeline.from_pretrained(
+                        "XCLIU/instaflow_0_9B_from_sd_1_5",
+                        safety_checker=None,
+                        torch_dtype=weight_dtype,
+                        text_encoder=text_encoder,
+                        vae=vae,
+                        unet=unet,
+                        tokenizer=tokenizer,
+                        scheduler=scheduler,
+                    ).to(device)
 
                     # generate image
-                    for i, t in enumerate(scheduler.timesteps):
-                        if i < grad_update_step:  # update only partial
-                            with torch.no_grad():
-                                latent_model_input = (
-                                    torch.cat([latents] * 2)
-                                    if do_classifier_free_guidance
-                                    else latents
-                                )
-                                noise_pred = unet(
-                                    latent_model_input,
-                                    t,
-                                    encoder_hidden_states=encoder_hidden_states,
-                                ).sample
+                    image = pipeline(prompt=batch['texts'][0],
+                                     num_inference_steps=1,
+                                     height=config.height,
+                                     width=config.width,
+                                     generator=generator,
+                                     guidance_scale=0.0
+                                     ).images[0]
 
-                                # perform guidance
-                                if do_classifier_free_guidance:
-                                    (
-                                        noise_pred_uncond,
-                                        noise_pred_text,
-                                    ) = noise_pred.chunk(2)
-                                    noise_pred = (
-                                        noise_pred_uncond
-                                        + config.guidance_scale
-                                        * (noise_pred_text - noise_pred_uncond)
-                                    )
-
-                                latents = scheduler.step(
-                                    noise_pred, t, latents
-                                ).prev_sample
-                        else:
-                            latent_model_input = (
-                                torch.cat([latents] * 2)
-                                if do_classifier_free_guidance
-                                else latents
-                            )
-                            noise_pred = unet(
-                                latent_model_input,
-                                t,
-                                encoder_hidden_states=encoder_hidden_states,
-                            ).sample
-                            # perform guidance
-                            if do_classifier_free_guidance:
-                                (
-                                    noise_pred_uncond,
-                                    noise_pred_text,
-                                ) = noise_pred.chunk(2)
-                                noise_pred = (
-                                    noise_pred_uncond
-                                    + config.guidance_scale
-                                    * (noise_pred_text - noise_pred_uncond)
-                                )
-
-                            latents = scheduler.step(
-                                noise_pred, t, latents
-                            ).prev_sample
-                            # scale and decode the image latents with vae
-
-                    latents_decode = 1 / 0.18215 * latents
-                    image = vae.decode(latents_decode).sample
-                    image = (image / 2 + 0.5).clamp(0, 1)
-
+                    image = image.unsqueeze(0)
                     image_out = image
+                    image = utils.transform_img_tensor(image, config).to(device)
 
-                    image = utils.transform_img_tensor(image, config)
                     prompt = [class_name.split()[-1]]
 
                     with torch.cuda.amp.autocast():
                         orig_output = classification_model.forward(image, prompt)
 
-                    output = torch.sum(orig_output[0] / 70)
+                    output = torch.sum(orig_output[0] / config.scale)
 
                     if classification_loss is None:
                         classification_loss = criterion(
                             output, torch.HalfTensor([class_infer]).cuda()
-                        ) / torch.HalfTensor([class_infer ** 2]).cuda()
+                        ) / torch.HalfTensor([class_infer]).cuda()
                     else:
                         classification_loss += criterion(
                             output, torch.HalfTensor([class_infer]).cuda()
-                        ) / torch.HalfTensor([class_infer ** 2]).cuda()
+                        ) / torch.HalfTensor([class_infer]).cuda()
 
                     text_inputs = processor(text=prompt, return_tensors="pt", padding=True).to(accelerator.device)
                     inputs = {**text_inputs, "pixel_values": image}
@@ -338,17 +265,17 @@ def train(config: RunConfig):
                         )
 
                         # counting prediction heatmap
-                        # pred_density = orig_output[0].detach().cpu().numpy()
-                        # pred_density = pred_density / pred_density.max()
-                        # pred_density_write = 1. - pred_density
-                        # pred_density_write = cv2.applyColorMap(np.uint8(255 * pred_density_write), cv2.COLORMAP_JET)
-                        # pred_density_write = pred_density_write / 255.
-                        # img = TF.resize(image.detach(), (384)).squeeze(0).permute(1, 2, 0).cpu().numpy()
-                        # heatmap_pred = 0.33 * img + 0.67 * pred_density_write
-                        # heatmap_pred = heatmap_pred / heatmap_pred.max()
-                        # display(utils.numpy_to_pil(
-                        #     heatmap_pred
-                        # )[0])
+                        pred_density = orig_output[0].detach().cpu().numpy()
+                        pred_density = pred_density / pred_density.max()
+                        pred_density_write = 1. - pred_density
+                        pred_density_write = cv2.applyColorMap(np.uint8(255 * pred_density_write), cv2.COLORMAP_JET)
+                        pred_density_write = pred_density_write / 255.
+                        img = TF.resize(image.detach(), (384)).squeeze(0).permute(1, 2, 0).cpu().numpy()
+                        heatmap_pred = 0.33 * img + 0.67 * pred_density_write
+                        heatmap_pred = heatmap_pred / heatmap_pred.max()
+                        display(utils.numpy_to_pil(
+                            heatmap_pred
+                        )[0])
 
                     torch.nn.utils.clip_grad_norm_(
                         text_encoder.get_input_embeddings().parameters(),
@@ -374,15 +301,12 @@ def train(config: RunConfig):
                         index_grads_to_zero, :
                     ].fill_(0)
 
-                    optimizer.step()
-                    optimizer.zero_grad()
-
-                    # Checks if the accelerator has performed an optimization step behind the scenes
-                    if accelerator.sync_gradients:
+                    # Checks if the accelerator has performed an optimization step behind the scenes\n",
+                    if step == config.epoch_size - 1:
                         if total_loss > 2 * min_loss:
-                            print("training collapse, try different hp")
-                            config.seed += 1
-                            print("updated seed", config.seed)
+                            print("!!!!training collapse, try different hp!!!!")
+                            # epoch = config.num_train_epochs
+                            # break
                         print("update")
                         if total_loss < min_loss:
                             min_loss = total_loss
@@ -393,24 +317,8 @@ def train(config: RunConfig):
                                 print(
                                     f"Saved the new discriminative class token pipeline of {class_name} to pipeline_{token_path}"
                                 )
-                                if config.sd_2_1:
-                                    pretrained_model_name_or_path = (
-                                        "stabilityai/stable-diffusion-2-1-base"
-                                    )
-                                else:
-                                    pretrained_model_name_or_path = (
-                                        "CompVis/stable-diffusion-v1-4"
-                                    )
-                                pipeline = StableDiffusionPipeline.from_pretrained(
-                                    pretrained_model_name_or_path,
-                                    text_encoder=accelerator.unwrap_model(
-                                        text_encoder
-                                    ),
-                                    vae=vae,
-                                    unet=unet,
-                                    tokenizer=tokenizer,
-                                )
-                                pipeline.save_pretrained(f"pipeline_{token_path}")
+                                pipeline.save_pretrained(
+                                    f"pipeline_{token_path}")  # TODO unwrap text encoder accelerator
                         else:
                             current_early_stopping -= 1
                         print(
@@ -419,9 +327,11 @@ def train(config: RunConfig):
 
                         total_loss = 0
                         global_step += 1
-            print(f"Current accuracy {correct / config.epoch_size}")
 
-            if (correct / config.epoch_size > 0.7) or current_early_stopping < 0:
+                    optimizer.step()
+                    optimizer.zero_grad()
+
+            if current_early_stopping < 0:
                 break
 
 
@@ -507,6 +417,9 @@ def evaluate(config: RunConfig):
 
 
 if __name__ == "__main__":
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     config = pyrallis.parse(config_class=RunConfig)
 
     # Check the arguments

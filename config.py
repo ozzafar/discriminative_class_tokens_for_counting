@@ -5,9 +5,10 @@ from pathlib import Path
 @dataclass
 class RunConfig:
     # Exp setup
-    class_index: int
     train: bool
     evaluate: bool
+    experiment: bool
+    evaluate_experiment: bool
 
     # Id of the experiment
     exp_id: str = "demo"
@@ -15,12 +16,14 @@ class RunConfig:
     # the classifier (Options: inet (ImageNet), inat (iNaturalist), cub (CUB200))
     classifier: str = "clip-count"
 
-    _lambda: float = 1  # @param {type:"number"}
-    scale: float = 70  # 80  #@param {type:"number"}
+    _lambda: float = 1
+    scale: float = 70
+    amount: float = 7
+    clazz:  str = "oranges"
 
     # Affect training time
     early_stopping: int = 15
-    num_train_epochs: int = 100
+    num_train_epochs: int = 50
 
     # affect variability of the training images
     # i.e., also sets batch size with accumulation
@@ -44,8 +47,6 @@ class RunConfig:
     guidance_scale: int = 7
     height: int = 512
     width: int = 512
-    num_of_SD_inference_steps: int = 35
-    num_of_SD_backpropagation_steps: int = 1
 
     # Discrimnative tokens
     placeholder_token: str = "newclas"

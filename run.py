@@ -1,3 +1,6 @@
+import time
+
+import pandas as pd
 import torch
 
 import os
@@ -5,11 +8,11 @@ from pathlib import Path
 import torch.utils.checkpoint
 import itertools
 
-from IPython.core.display_functions import display
+from PIL import Image
 from accelerate import Accelerator
 from diffusers import StableDiffusionPipeline
 from torch import device
-from transformers import CLIPProcessor, CLIPModel
+from transformers import CLIPProcessor, CLIPModel, YolosForObjectDetection, YolosImageProcessor
 
 import prompt_dataset
 import utils
@@ -24,24 +27,27 @@ import shutil
 
 
 def train(config: RunConfig):
-    # Classification model
+    os.environ['TORCH_USE_CUDA_DSA'] = "1"
+    torch.autograd.set_detect_anomaly(True)
+
     classification_model = utils.prepare_classifier(config)
+    # TODO move to prepare_clip
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
     clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
 
-    current_early_stopping = RunConfig.early_stopping
+    train_start = time.time()
 
     exp_identifier = (
         f'{config.epoch_size}_{config.lr}_'
-        f"{config.seed}_{config.number_of_prompts}_{config.early_stopping}_{config.num_of_SD_backpropagation_steps}"
+        f"{config.seed}_{config.number_of_prompts}_{config.early_stopping}"
     )
 
     #### Train ####
     print(f"Start experiment {exp_identifier}")
 
-    class_name = "15 oranges"
+    class_name = f"{config.amount} {config.clazz}"
     print(f"Start training class token for {class_name}")
-    img_dir_path = f"img/{class_name}/train"
+    img_dir_path = f"img/{config.clazz}_{config.amount}_{config.seed}/train"
     if Path(img_dir_path).exists():
         shutil.rmtree(img_dir_path)
     Path(img_dir_path).mkdir(parents=True, exist_ok=True)
@@ -175,168 +181,164 @@ def train(config: RunConfig):
     Path(token_dir_path).mkdir(parents=True, exist_ok=True)
     token_path = f"{token_dir_path}/{exp_identifier}_{class_name}"
 
-    latents_shape = (
-        config.batch_size,
-        unet.config.in_channels,
-        config.height // 8,
-        config.width // 8,
-    )
+    #### Training loop ####
+    for epoch in range(config.num_train_epochs):
+        print(f"Epoch {epoch}")
+        generator = torch.Generator(
+            device=config.device
+        )  # Seed generator to create the inital latent noise
+        generator.manual_seed(config.seed)
+        for step, batch in enumerate(train_dataloader):
+            # setting the generator here means we update the same images
+            classification_loss = None
+            with accelerator.accumulate(text_encoder):
+                generator.manual_seed(config.seed)
+                pipeline = RectifiedFlowPipeline.from_pretrained(
+                    "XCLIU/instaflow_0_9B_from_sd_1_5",
+                    safety_checker=None,
+                    torch_dtype=weight_dtype,
+                    text_encoder=text_encoder,
+                    vae=vae,
+                    unet=unet,
+                    tokenizer=tokenizer,
+                    scheduler=scheduler,
+                ).to(device)
 
-    if config.skip_exists and os.path.isfile(token_path):
-        print(f"Token already exist at {token_path}")
-        return
-    else:
-        for epoch in range(config.num_train_epochs):
-            print(f"Epoch {epoch}")
-            generator = torch.Generator(
-                device=config.device
-            )  # Seed generator to create the inital latent noise
-            generator.manual_seed(config.seed)
-            for step, batch in enumerate(train_dataloader):
-                # setting the generator here means we update the same images
-                classification_loss = None
-                with accelerator.accumulate(text_encoder):
+                # generate image
+                image = pipeline(prompt=batch['texts'][0],
+                                 num_inference_steps=1,
+                                 height=config.height,
+                                 width=config.width,
+                                 generator=generator,
+                                 guidance_scale=0.0
+                                 ).images[0]
 
-                    pipeline = RectifiedFlowPipeline.from_pretrained(
-                        "XCLIU/instaflow_0_9B_from_sd_1_5",
-                        safety_checker=None,
-                        torch_dtype=weight_dtype,
-                        text_encoder=text_encoder,
-                        vae=vae,
-                        unet=unet,
-                        tokenizer=tokenizer,
-                        scheduler=scheduler,
-                    ).to(device)
+                image = image.unsqueeze(0)
+                image_out = image
+                image = utils.transform_img_tensor(image, config).to(device)
 
-                    # generate image
-                    image = pipeline(prompt=batch['texts'][0],
-                                     num_inference_steps=1,
-                                     height=config.height,
-                                     width=config.width,
-                                     generator=generator,
-                                     guidance_scale=0.0
-                                     ).images[0]
+                prompt = [class_name.split()[-1]]
 
-                    image = image.unsqueeze(0)
-                    image_out = image
-                    image = utils.transform_img_tensor(image, config).to(device)
+                with torch.cuda.amp.autocast():
+                    orig_output = classification_model.forward(image, prompt)
 
-                    prompt = [class_name.split()[-1]]
+                output = torch.sum(orig_output[0] / config.scale)
 
-                    with torch.cuda.amp.autocast():
-                        orig_output = classification_model.forward(image, prompt)
+                if classification_loss is None:
+                    classification_loss = criterion(
+                        output, torch.HalfTensor([class_infer]).cuda()
+                    ) / torch.HalfTensor([1]).cuda()
+                else:
+                    classification_loss += criterion(
+                        output, torch.HalfTensor([class_infer]).cuda()
+                    ) / torch.HalfTensor([1]).cuda()
 
-                    output = torch.sum(orig_output[0] / config.scale)
+                text_inputs = processor(text=prompt, return_tensors="pt", padding=True).to(accelerator.device)
+                inputs = {**text_inputs, "pixel_values": image}
+                clip_output = (clip(**inputs)[0][0] / 100).cuda()
+                clip_output = config._lambda * (1 - clip_output)
 
-                    if classification_loss is None:
-                        classification_loss = criterion(
-                            output, torch.HalfTensor([class_infer]).cuda()
-                        ) / torch.HalfTensor([class_infer]).cuda()
-                    else:
-                        classification_loss += criterion(
-                            output, torch.HalfTensor([class_infer]).cuda()
-                        ) / torch.HalfTensor([class_infer]).cuda()
+                classification_loss += clip_output
 
-                    text_inputs = processor(text=prompt, return_tensors="pt", padding=True).to(accelerator.device)
-                    inputs = {**text_inputs, "pixel_values": image}
-                    clip_output = (clip(**inputs)[0][0] / 100).cuda()
-                    clip_output = config._lambda * (1 - clip_output)
+                total_loss += classification_loss.detach().item()
 
-                    classification_loss += clip_output
-
-                    total_loss += classification_loss.detach().item()
-
-                    # log
-                    txt = f"On epoch {epoch} \n"
-                    with torch.no_grad():
-                        txt += f"{batch['texts']} \n"
-                        txt += f"{output.item()=} \n"
-                        txt += f"Loss: {classification_loss.detach().item()} \n"
-                        txt += f"Clip-Count loss: {classification_loss.detach().item() - clip_output.detach().item()} \n"
-                        txt += f"Clip loss: {clip_output.detach().item()}"
-                        with open("run_log.txt", "a") as f:
-                            print(txt, file=f)
-                        print(txt)
-                        utils.numpy_to_pil(
-                            image_out.permute(0, 2, 3, 1).cpu().detach().numpy()
-                        )[0].save(
-                            f"{img_dir_path}/{epoch}_7 oranges_{classification_loss.detach().item()}.jpg",
-                            "JPEG",
-                        )
-
-                        # counting prediction heatmap
-                        pred_density = orig_output[0].detach().cpu().numpy()
-                        pred_density = pred_density / pred_density.max()
-                        pred_density_write = 1. - pred_density
-                        pred_density_write = cv2.applyColorMap(np.uint8(255 * pred_density_write), cv2.COLORMAP_JET)
-                        pred_density_write = pred_density_write / 255.
-                        img = TF.resize(image.detach(), (384)).squeeze(0).permute(1, 2, 0).cpu().numpy()
-                        heatmap_pred = 0.33 * img + 0.67 * pred_density_write
-                        heatmap_pred = heatmap_pred / heatmap_pred.max()
-                        display(utils.numpy_to_pil(
-                            heatmap_pred
-                        )[0])
-
-                    torch.nn.utils.clip_grad_norm_(
-                        text_encoder.get_input_embeddings().parameters(),
-                        config.max_grad_norm,
+                # log
+                txt = f"On epoch {epoch} \n"
+                with torch.no_grad():
+                    txt += f"{batch['texts']} \n"
+                    txt += f"{output.item()=} \n"
+                    txt += f"Loss: {classification_loss.detach().item()} \n"
+                    txt += f"Clip-Count loss: {classification_loss.detach().item() - clip_output.detach().item()} \n"
+                    txt += f"Clip loss: {clip_output.detach().item()}"
+                    with open("run_log.txt", "a") as f:
+                        print(txt, file=f)
+                    print(txt)
+                    utils.numpy_to_pil(
+                        image_out.permute(0, 2, 3, 1).cpu().detach().numpy()
+                    )[0].save(
+                        f"{img_dir_path}/{epoch}_{class_name}_{classification_loss.detach().item()}.jpg",
+                        "JPEG",
                     )
 
-                    accelerator.backward(classification_loss)
+                    # counting prediction heatmap
+                    pred_density = orig_output[0].detach().cpu().numpy()
+                    pred_density = pred_density / pred_density.max()
+                    pred_density_write = 1. - pred_density
+                    pred_density_write = cv2.applyColorMap(np.uint8(255 * pred_density_write), cv2.COLORMAP_JET)
+                    pred_density_write = pred_density_write / 255.
+                    img = TF.resize(image.detach(), (384)).squeeze(0).permute(1, 2, 0).cpu().numpy()
+                    heatmap_pred = 0.33 * img + 0.67 * pred_density_write
+                    heatmap_pred = heatmap_pred / heatmap_pred.max()
+                    utils.numpy_to_pil(
+                        heatmap_pred
+                    )[0].save(
+                        f"{img_dir_path}/{epoch}_{class_name}_{classification_loss.detach().item()}_heatmap.jpg",
+                        "JPEG",
+                    )
 
-                    # Zero out the gradients for all token embeddings except the newly added
-                    # embeddings for the concept, as we only want to optimize the concept embeddings
-                    if accelerator.num_processes > 1:
-                        grads = (
-                            text_encoder.module.get_input_embeddings().weight.grad
-                        )
-                    else:
-                        grads = text_encoder.get_input_embeddings().weight.grad
+                torch.nn.utils.clip_grad_norm_(
+                    text_encoder.get_input_embeddings().parameters(),
+                    config.max_grad_norm,
+                )
 
-                    # Get the index for tokens that we want to zero the grads for
-                    index_grads_to_zero = (
+                accelerator.backward(classification_loss)
+
+                # Zero out the gradients for all token embeddings except the newly added
+                # embeddings for the concept, as we only want to optimize the concept embeddings
+                if accelerator.num_processes > 1:
+                    grads = (
+                        text_encoder.module.get_input_embeddings().weight.grad
+                    )
+                else:
+                    grads = text_encoder.get_input_embeddings().weight.grad
+
+                # Get the index for tokens that we want to zero the grads for
+                index_grads_to_zero = (
                         torch.arange(len(tokenizer)) != placeholder_token_id
+                )
+                grads.data[index_grads_to_zero, :] = grads.data[
+                    index_grads_to_zero, :
+                ].fill_(0)
+
+                if epoch == step == 0:
+                    img_path = f"{img_dir_path}/actual.jpg"
+                    utils.numpy_to_pil(image_out.permute(0, 2, 3, 1).cpu().detach().numpy())[0].save(img_path, "JPEG")
+                # Checks if the accelerator has performed an optimization step behind the scenes\n",
+                if step == config.epoch_size - 1:
+                    if total_loss > 2 * min_loss:
+                        print("!!!!training collapse, try different hp!!!!")
+                        # epoch = config.num_train_epochs
+                        # break
+                    if total_loss < min_loss:
+                        min_loss = total_loss
+                        current_early_stopping = config.early_stopping
+                        # Create the pipeline using the trained modules and save it.
+                        accelerator.wait_for_everyone()
+                        if accelerator.is_main_process:
+                            print(
+                                f"Saved the new discriminative class token pipeline of {class_name} to pipeline_{token_path}"
+                            )
+                            img_path = f"{img_dir_path}/optimized.jpg"
+                            utils.numpy_to_pil(image_out.permute(0, 2, 3, 1).cpu().detach().numpy())[0].save(img_path,"JPEG")
+                            # pipeline.save_pretrained(f"pipeline_{token_path}") # TODO unwrap text encoder accelerator
+                    else:
+                        current_early_stopping -= 1
+                    print(
+                        f"{current_early_stopping} steps to stop, current best {min_loss}"
                     )
-                    grads.data[index_grads_to_zero, :] = grads.data[
-                        index_grads_to_zero, :
-                    ].fill_(0)
 
-                    # Checks if the accelerator has performed an optimization step behind the scenes\n",
-                    if step == config.epoch_size - 1:
-                        if total_loss > 2 * min_loss:
-                            print("!!!!training collapse, try different hp!!!!")
-                            # epoch = config.num_train_epochs
-                            # break
-                        print("update")
-                        if total_loss < min_loss:
-                            min_loss = total_loss
-                            current_early_stopping = config.early_stopping
-                            # Create the pipeline using the trained modules and save it.
-                            accelerator.wait_for_everyone()
-                            if accelerator.is_main_process:
-                                print(
-                                    f"Saved the new discriminative class token pipeline of {class_name} to pipeline_{token_path}"
-                                )
-                                pipeline.save_pretrained(
-                                    f"pipeline_{token_path}")  # TODO unwrap text encoder accelerator
-                        else:
-                            current_early_stopping -= 1
-                        print(
-                            f"{current_early_stopping} steps to stop, current best {min_loss}"
-                        )
+                    total_loss = 0
+                    global_step += 1
 
-                        total_loss = 0
-                        global_step += 1
+                optimizer.step()
+                optimizer.zero_grad()
 
-                    optimizer.step()
-                    optimizer.zero_grad()
+        if current_early_stopping < 0:
+            break
 
-            if current_early_stopping < 0:
-                break
-
+    print(f"End training time: {time.time() - train_start}")
 
 def evaluate(config: RunConfig):
-    class_index = config.class_index - 1
 
     classification_model = utils.prepare_classifier(config)
 
@@ -408,22 +410,96 @@ def evaluate(config: RunConfig):
                 0
             ].save(img_path, "JPEG")
 
-            if pred_class == class_index:
-                correct += 1
-        acc = correct / config.test_size
         print(
-            f"-----------------------Accuracy {descriptive_token} {acc}-----------------------------"
+            f"-----------------------Accuracy {descriptive_token} -----------------------------"
         )
+
+
+def run_experiments(config: RunConfig):
+    classes = ["oranges"]
+    intervals = [(0, 5), (5, 10), (10, 15), (15, 30), (30, 50)]
+    scales = [90, 80, 70, 60, 60]
+    seeds = [35, 1]
+
+    # classes = ["oranges"]
+    # intervals = [(1, 2)]
+    # scales = [90]
+    # seeds = [35]
+
+    for clazz in classes:
+        for i, interval in enumerate(intervals):
+            scale = scales[i]
+            for amount in range(interval[0] + 1, interval[1] + 1):
+                for seed in seeds:
+                    print(f"*** Running experiment {clazz=},{amount=},{seed=}")
+                    config.clazz = clazz
+                    config.scale = scale
+                    config.amount = amount
+                    config.seed = seed
+                    train(config)
+
+
+def evaluate_experiment(model, image_processor, image_path, clazz):
+    count = 0
+    image = Image.open(image_path)
+
+    inputs = image_processor(images=image, return_tensors="pt")
+    outputs = model(**inputs)
+
+    # print results
+    target_sizes = torch.tensor([image.size[::-1]])
+    results = image_processor.post_process_object_detection(outputs, threshold=0.8, target_sizes=target_sizes)[0]
+    for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
+        if model.config.id2label[label.item()] == clazz[:-1]:
+            count += 1
+
+    return count
+
+
+def evaluate_experiments(config: RunConfig):
+    model = YolosForObjectDetection.from_pretrained('hustvl/yolos-tiny')
+    image_processor = YolosImageProcessor.from_pretrained("hustvl/yolos-tiny")
+
+    df = pd.DataFrame(columns=['class', 'seed', 'amount', 'sd_count', 'sd_optimized_count'])
+
+    # Iterate over each subfolder inside the main folder
+    for subfolder in os.listdir("img"):
+        if not subfolder.startswith(config.clazz):
+            continue
+
+        clazz, amount, seed = subfolder.split('_')
+        subfolder_path = os.path.join("img", subfolder, "train")
+
+        detected_actual_amount = evaluate_experiment(model, image_processor, subfolder_path + "/actual.jpg", clazz)
+        detected_optimized_amount = evaluate_experiment(model, image_processor, subfolder_path + "/optimized.jpg", clazz)
+
+        new_row = {'class': clazz, 'seed': seed, 'amount': amount, 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount}
+        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+
+    dir_name = "experiments"
+    experiment_path = f"{dir_name}/experiment_{time.strftime('%Y%m%d_%H%M%S')}.pkl"
+
+    if not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+
+    df.to_pickle(experiment_path)
+
+    df = pd.read_pickle(experiment_path)
 
 
 if __name__ == "__main__":
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
     config = pyrallis.parse(config_class=RunConfig)
+    print(str(config).replace(" ",'\n'))
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Check the arguments
     if config.train:
         train(config)
     if config.evaluate:
         evaluate(config)
+    if config.experiment:
+        run_experiments(config)
+    if config.evaluate_experiment:
+        evaluate_experiments(config)

@@ -16,7 +16,7 @@ from transformers import CLIPProcessor, CLIPModel, YolosForObjectDetection, Yolo
 
 import prompt_dataset
 import utils
-from InstaFlow.code.pipeline_rf import RectifiedFlowPipeline
+from insta_flow.code.pipeline_rf import RectifiedFlowPipeline
 import numpy as np
 import cv2
 import torchvision.transforms.functional as TF

@@ -12,7 +12,7 @@ import torch
 
 import kornia
 
-from InstaFlow.code.pipeline_rf import RectifiedFlowPipeline
+from insta_flow.code.pipeline_rf import RectifiedFlowPipeline
 
 # From timm.data.constants
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)

@@ -1,4 +1,4 @@
-name: discriminative-token
+name: discriminative-token-for-counting
 channels:
   - anaconda
   - conda-forge

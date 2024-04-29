@@ -410,10 +410,6 @@ def evaluate(config: RunConfig):
                 0
             ].save(img_path, "JPEG")
 
-        print(
-            f"-----------------------Accuracy {descriptive_token} -----------------------------"
-        )
-
 
 def run_experiments(config: RunConfig):
     classes = ["oranges"]
@@ -426,6 +422,7 @@ def run_experiments(config: RunConfig):
     # scales = [90]
     # seeds = [35]
 
+    start = time.time()
     for clazz in classes:
         for i, interval in enumerate(intervals):
             scale = scales[i]
@@ -437,7 +434,7 @@ def run_experiments(config: RunConfig):
                     config.amount = amount
                     config.seed = seed
                     train(config)
-
+    print(f"experiment took {start/360} hours")
 
 def evaluate_experiment(model, image_processor, image_path, clazz):
     count = 0
@@ -473,7 +470,7 @@ def evaluate_experiments(config: RunConfig):
         detected_actual_amount = evaluate_experiment(model, image_processor, subfolder_path + "/actual.jpg", clazz)
         detected_optimized_amount = evaluate_experiment(model, image_processor, subfolder_path + "/optimized.jpg", clazz)
 
-        new_row = {'class': clazz, 'seed': seed, 'amount': amount, 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount}
+        new_row = {'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount}
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
     dir_name = "experiments"
@@ -482,10 +479,32 @@ def evaluate_experiments(config: RunConfig):
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
 
+    df['sd_count_diff'] = abs(df['sd_count'] - df['amount'])
+    df['sd_optimized_count_diff'] = abs(df['sd_optimized_count'] - df['amount'])
+
+    df['sd_count_ratio'] = df[['sd_count', 'amount']].min(axis=1) / df[['sd_count', 'amount']].max(axis=1)
+    df['sd_optimized_count_ratio'] = df[['sd_optimized_count', 'amount']].min(axis=1) / df[['sd_optimized_count', 'amount']].max(axis=1)
+
     df.to_pickle(experiment_path)
 
-    df = pd.read_pickle(experiment_path)
+    # Calculate the results
+    avg_sd_count_diff = df['sd_count_diff'].mean()
+    avg_sd_optimized_count_diff = df['sd_optimized_count_diff'].mean()
+    avg_diff_per_seed = df.groupby('seed').agg({'sd_count_diff': 'mean', 'sd_optimized_count_diff': 'mean'})
 
+    avg_sd_count_ratio = df['sd_count_ratio'].mean()
+    avg_sd_optimized_count_ratio = df['sd_optimized_count_ratio'].mean()
+    avg_ratio_per_seed = df.groupby('seed').agg({'sd_count_ratio': 'mean', 'sd_optimized_count_ratio': 'mean'})
+
+    print("\n*** Average Difference Results ***\n")
+    print(f"SD average difference: {avg_sd_count_diff}")
+    print(f"SD-optimized average difference: {avg_sd_optimized_count_diff}")
+    print(f"differences per seed: {avg_diff_per_seed}")
+
+    print("\n*** Average Ratio Results ***\n")
+    print(f"SD average ratio: {avg_sd_count_ratio}")
+    print(f"SD-optimized average ratio: {avg_sd_optimized_count_ratio}")
+    print(f"ratios per seed: {avg_ratio_per_seed}")
 
 if __name__ == "__main__":
 

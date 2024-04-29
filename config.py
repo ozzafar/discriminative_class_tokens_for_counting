@@ -10,6 +10,8 @@ class RunConfig:
     experiment: bool
     evaluate_experiment: bool
 
+    is_v2: bool = False
+
     # Id of the experiment
     exp_id: str = "demo"
 

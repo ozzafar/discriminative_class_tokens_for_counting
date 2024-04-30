@@ -13,4 +13,4 @@
 #SBATCH --cpus-per-task=4 # CPU cores per process
 #SBATCH --gpus=2 # GPUs in total
 
-python --train False --evaluate False --experiment False --evaluate_experiment True --is_v2 True
+python run.py --train False --evaluate False --experiment False --evaluate_experiment True --is_v2 True

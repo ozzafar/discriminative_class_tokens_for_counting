@@ -3,7 +3,7 @@
 #SBATCH --job-name=train_sd
 #SBATCH --output=/home/yandex/DL20232024a/ozzafar/discriminative_class_tokens_for_counting/output/train.out # redirect stdout
 #SBATCH --error=/home/yandex/DL20232024a/ozzafar/discriminative_class_tokens_for_counting/output/train.err # redirect stderr
-#SBATCH --partition=studentkillable # (see resources section)
+#SBATCH --partition=gpu-milo # (see resources section)
 #SBATCH --account=gpu-research
 #SBATCH --time=720 # max time (minutes)
 #SBATCH --signal=USR1@120 # how to end job when time’s up

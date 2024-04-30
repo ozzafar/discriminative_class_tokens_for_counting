@@ -40,7 +40,7 @@ def train(config: RunConfig):
 
     exp_identifier = (
         f'{config.epoch_size}_{config.lr}_'
-        f"{config.seed}_{config.number_of_prompts}_{config.early_stopping}"
+        f"{config.seed}_{config.number_of_prompts}_{config.early_stopping}_v1"
     )
 
     #### Train ####
@@ -48,7 +48,7 @@ def train(config: RunConfig):
 
     class_name = f"{config.amount} {config.clazz}"
     print(f"Start training class token for {class_name}")
-    img_dir_path = f"img/{config.clazz}_{config.amount}_{config.seed}/train"
+    img_dir_path = f"img/{config.clazz}_{config.amount}_{config.seed}_v1/train"
     if Path(img_dir_path).exists():
         shutil.rmtree(img_dir_path)
     Path(img_dir_path).mkdir(parents=True, exist_ok=True)
@@ -352,7 +352,7 @@ def trainv2(config: RunConfig):
 
     exp_identifier = (
         f'{config.epoch_size}_{config.lr}_'
-        f"{config.seed}_{config.number_of_prompts}_{config.early_stopping}"
+        f"{config.seed}_{config.number_of_prompts}_{config.early_stopping}_v2"
     )
 
     #### Train ####
@@ -732,8 +732,8 @@ def evaluate(config: RunConfig):
 
 def run_experiments(config: RunConfig):
     classes = ["oranges"]
-    intervals = [(0, 5), (5, 10), (10, 15), (15, 30), (30, 50)]
-    scales = [90, 80, 70, 60, 60]
+    intervals = [(0, 5), (5, 10), (10, 15), (15, 30)]
+    scales = [90, 80, 70, 60]
     seeds = [35, 1]
 
     # classes = ["oranges"]
@@ -752,8 +752,10 @@ def run_experiments(config: RunConfig):
                     config.scale = scale
                     config.amount = amount
                     config.seed = seed
-                    train(config)
-    print(f"experiment took {start/360} hours")
+                    if config.is_v2:
+                        trainv2(config)
+                    else:
+                        train(config)
 
 def evaluate_experiment(model, image_processor, image_path, clazz):
     count = 0
@@ -782,8 +784,11 @@ def evaluate_experiments(config: RunConfig):
     for subfolder in os.listdir("img"):
         if not subfolder.startswith(config.clazz):
             continue
+        version = "v2" if config.is_v2 else "v1"
+        if version not in subfolder:
+            continue
 
-        clazz, amount, seed = subfolder.split('_')
+        clazz, amount, seed, v = subfolder.split('_')
         subfolder_path = os.path.join("img", subfolder, "train")
 
         detected_actual_amount = evaluate_experiment(model, image_processor, subfolder_path + "/actual.jpg", clazz)
@@ -798,8 +803,11 @@ def evaluate_experiments(config: RunConfig):
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
 
-    df['sd_count_diff'] = abs(df['sd_count'] - df['amount'])/df['amount']
-    df['sd_optimized_count_diff'] = abs(df['sd_optimized_count'] - df['amount'])/df['amount']
+    df['sd_count_diff'] = abs(df['sd_count'] - df['amount'])
+    df['sd_optimized_count_diff'] = abs(df['sd_optimized_count'] - df['amount'])
+
+    df['sd_count_diff_norm'] = abs(df['sd_count'] - df['amount'])/df['amount']
+    df['sd_optimized_count_diff_norm'] = abs(df['sd_optimized_count'] - df['amount'])/df['amount']
 
     df['sd_count_ratio'] = df[['sd_count', 'amount']].min(axis=1) / df[['sd_count', 'amount']].max(axis=1)
     df['sd_optimized_count_ratio'] = df[['sd_optimized_count', 'amount']].min(axis=1) / df[['sd_optimized_count', 'amount']].max(axis=1)
@@ -810,20 +818,15 @@ def evaluate_experiments(config: RunConfig):
     avg_sd_count_diff = df['sd_count_diff'].mean()
     avg_sd_optimized_count_diff = df['sd_optimized_count_diff'].mean()
     avg_diff_per_seed = df.groupby('seed').agg({'sd_count_diff': 'mean', 'sd_optimized_count_diff': 'mean'})
-
-    # avg_sd_count_ratio = df['sd_count_ratio'].mean()
-    # avg_sd_optimized_count_ratio = df['sd_optimized_count_ratio'].mean()
-    # avg_ratio_per_seed = df.groupby('seed').agg({'sd_count_ratio': 'mean', 'sd_optimized_count_ratio': 'mean'})
+    avg_sd_count_diff_norm = df['sd_count_diff_norm'].mean()
+    avg_sd_optimized_count_diff_norm = df['sd_optimized_count_diff_norm'].mean()
+    avg_diff_per_seed_norm = df.groupby('seed').agg({'sd_count_diff_norm': 'mean', 'sd_optimized_count_diff_norm': 'mean'})
 
     print("\n*** Average Difference Results ***\n")
-    print(f"SD average difference: {avg_sd_count_diff}")
-    print(f"SD-optimized average difference: {avg_sd_optimized_count_diff}")
+    print(f"SD average difference: {avg_sd_count_diff}, normalized: {avg_sd_count_diff_norm}")
+    print(f"SD-optimized average difference: {avg_sd_optimized_count_diff}, normalized: {avg_sd_optimized_count_diff_norm}")
     print(f"differences per seed: {avg_diff_per_seed}")
-
-    # print("\n*** Average Ratio Results ***\n")
-    # print(f"SD average ratio: {avg_sd_count_ratio}")
-    # print(f"SD-optimized average ratio: {avg_sd_optimized_count_ratio}")
-    # print(f"ratios per seed: {avg_ratio_per_seed}")
+    print(f"normalized differences per seed: {avg_diff_per_seed_norm}")
 
 def is_valid(matrix, row, col, visited):
     num_rows = len(matrix)

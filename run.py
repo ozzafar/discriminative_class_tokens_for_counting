@@ -337,7 +337,7 @@ def train(config: RunConfig):
         if current_early_stopping < 0:
             break
 
-    print(f"End training time: {time.time() - train_start}")
+    print(f"End training time: {(time.time() - train_start)/60} minutes")
 
 def trainv2(config: RunConfig):
     os.environ['TORCH_USE_CUDA_DSA'] = "1"
@@ -360,7 +360,7 @@ def trainv2(config: RunConfig):
 
     class_name = f"{config.amount} {config.clazz}"
     print(f"Start training class token for {class_name}")
-    img_dir_path = f"img/{config.clazz}_{config.amount}_{config.seed}/train"
+    img_dir_path = f"img/{config.clazz}_{config.amount}_{config.seed}_v2/train"
     if Path(img_dir_path).exists():
         shutil.rmtree(img_dir_path)
     Path(img_dir_path).mkdir(parents=True, exist_ok=True)
@@ -655,7 +655,7 @@ def trainv2(config: RunConfig):
         if current_early_stopping < 0:
             break
 
-    print(f"End training time: {time.time() - train_start}")
+    print(f"End training time: {(time.time() - train_start)/60} minutes")
 
 def evaluate(config: RunConfig):
 

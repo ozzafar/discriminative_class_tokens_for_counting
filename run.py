@@ -752,10 +752,15 @@ def run_experiments(config: RunConfig):
                     config.scale = scale
                     config.amount = amount
                     config.seed = seed
-                    if config.is_v2:
-                        trainv2(config)
-                    else:
-                        train(config)
+                    try:
+                        if config.is_v2:
+                            trainv2(config)
+                        else:
+                            train(config)
+                    except:
+                        print("train failed")
+
+    print(f"Overall experiment time: {(time.time()-start)/3600} hours")
 
 def evaluate_experiment(model, image_processor, image_path, clazz):
     count = 0
@@ -766,7 +771,7 @@ def evaluate_experiment(model, image_processor, image_path, clazz):
 
     # print results
     target_sizes = torch.tensor([image.size[::-1]])
-    results = image_processor.post_process_object_detection(outputs, threshold=0.8, target_sizes=target_sizes)[0]
+    results = image_processor.post_process_object_detection(outputs, threshold=0.5, target_sizes=target_sizes)[0]
     for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
         if model.config.id2label[label.item()] == clazz[:-1]:
             count += 1
@@ -780,10 +785,10 @@ def evaluate_experiments(config: RunConfig):
 
     df = pd.DataFrame(columns=['class', 'seed', 'amount', 'sd_count', 'sd_optimized_count'])
 
+    detected_optimized_amount = evaluate_experiment(model, image_processor,  "img.png", "oranges")
     # Iterate over each subfolder inside the main folder
     for subfolder in os.listdir("img"):
-        if not subfolder.startswith(config.clazz):
-            continue
+
         version = "v2" if config.is_v2 else "v1"
         if version not in subfolder:
             continue
@@ -798,7 +803,7 @@ def evaluate_experiments(config: RunConfig):
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
     dir_name = "experiments"
-    experiment_path = f"{dir_name}/experiment_{time.strftime('%Y%m%d_%H%M%S')}.pkl"
+    experiment_path = f"{dir_name}/experiment_{version}.pkl"
 
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)

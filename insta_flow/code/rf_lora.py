@@ -1,8 +1,8 @@
 import copy
 import torch
 from safetensors import safe_open
-from pipeline_rf import RectifiedFlowPipeline
 import argparse
+from insta_flow.code.pipeline_rf import RectifiedFlowPipeline
 
 def merge_dW_to_unet(pipe, dW_dict, alpha=1.0):
     _tmp_sd = pipe.unet.state_dict()
@@ -16,7 +16,7 @@ def load_hf_hub_lora(pipe_rf, lora_path='Lykon/dreamshaper-7', save_dW = False, 
     from diffusers import DiffusionPipeline
     _pipe = DiffusionPipeline.from_pretrained(
         base_sd, 
-        torch_dtype=torch.float16,
+        torch_dtype=torch.float32,
         safety_checker = None,
     )
     sd_state_dict = _pipe.unet.state_dict()
@@ -24,7 +24,7 @@ def load_hf_hub_lora(pipe_rf, lora_path='Lykon/dreamshaper-7', save_dW = False, 
     # get weights of the customized sd models, e.g., the aniverse downloaded from civitai.com    
     _pipe = DiffusionPipeline.from_pretrained(
         lora_path, 
-        torch_dtype=torch.float16,
+        torch_dtype=torch.float32,
         safety_checker = None,
     )
     lora_unet_checkpoint = _pipe.unet.state_dict()

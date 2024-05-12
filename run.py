@@ -26,6 +26,8 @@ from config import RunConfig
 import pyrallis
 import shutil
 
+from insta_flow.code.rf_lora import load_hf_hub_lora
+
 
 def train(config: RunConfig):
     os.environ['TORCH_USE_CUDA_DSA'] = "1"
@@ -48,13 +50,29 @@ def train(config: RunConfig):
 
     class_name = f"{config.amount} {config.clazz}"
     print(f"Start training class token for {class_name}")
-    img_dir_path = f"img/{config.clazz}_{config.amount}_{config.seed}_v1/train"
+    img_dir_path = f"img/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
     if Path(img_dir_path).exists():
         shutil.rmtree(img_dir_path)
     Path(img_dir_path).mkdir(parents=True, exist_ok=True)
 
     # Stable model
     unet, vae, text_encoder, scheduler, tokenizer = utils.prepare_stable(config)
+
+    pipeline = RectifiedFlowPipeline.from_pretrained(
+        "XCLIU/instaflow_0_9B_from_sd_1_5",
+        safety_checker=None,
+        torch_dtype=torch.float32,
+        text_encoder=text_encoder,
+        vae=vae,
+        unet=unet,
+        tokenizer=tokenizer,
+        scheduler=scheduler
+    )
+
+    load_hf_hub_lora(pipeline, lora_path="Lykon/dreamshaper-7", save_dW=False, alpha=1.0)
+    pipeline.to(device)  ### if GPU is not available, comment this line
+
+    unet, vae, text_encoder, scheduler, tokenizer = pipeline.unet, pipeline.vae, pipeline.text_encoder, pipeline.scheduler, pipeline.tokenizer
 
     #  Extend tokenizer and add a discriminative token ###
     class_infer = int(class_name.split()[0])
@@ -194,16 +212,6 @@ def train(config: RunConfig):
             classification_loss = None
             with accelerator.accumulate(text_encoder):
                 generator.manual_seed(config.seed)
-                pipeline = RectifiedFlowPipeline.from_pretrained(
-                    "XCLIU/instaflow_0_9B_from_sd_1_5",
-                    safety_checker=None,
-                    torch_dtype=weight_dtype,
-                    text_encoder=text_encoder,
-                    vae=vae,
-                    unet=unet,
-                    tokenizer=tokenizer,
-                    scheduler=scheduler,
-                ).to(device)
 
                 # generate image
                 image = pipeline(prompt=batch['texts'][0],
@@ -360,13 +368,29 @@ def trainv2(config: RunConfig):
 
     class_name = f"{config.amount} {config.clazz}"
     print(f"Start training class token for {class_name}")
-    img_dir_path = f"img/{config.clazz}_{config.amount}_{config.seed}_v2/train"
+    img_dir_path = f"img/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v2/train"
     if Path(img_dir_path).exists():
         shutil.rmtree(img_dir_path)
     Path(img_dir_path).mkdir(parents=True, exist_ok=True)
 
     # Stable model
     unet, vae, text_encoder, scheduler, tokenizer = utils.prepare_stable(config)
+
+    pipeline = RectifiedFlowPipeline.from_pretrained(
+        "XCLIU/instaflow_0_9B_from_sd_1_5",
+        safety_checker=None,
+        torch_dtype=torch.float32,
+        text_encoder=text_encoder,
+        vae=vae,
+        unet=unet,
+        tokenizer=tokenizer,
+        scheduler=scheduler
+    )
+
+    load_hf_hub_lora(pipeline, lora_path="Lykon/dreamshaper-7", save_dW=False, alpha=1.0)
+    pipeline.to(device)  ### if GPU is not available, comment this line
+
+    unet, vae, text_encoder, scheduler, tokenizer = pipeline.unet, pipeline.vae, pipeline.text_encoder, pipeline.scheduler, pipeline.tokenizer
 
     #  Extend tokenizer and add a discriminative token ###
     class_infer = int(class_name.split()[0])
@@ -502,20 +526,11 @@ def trainv2(config: RunConfig):
         )  # Seed generator to create the inital latent noise
         generator.manual_seed(config.seed)
         for step, batch in enumerate(train_dataloader):
+            step_start = time.time()
             # setting the generator here means we update the same images
             classification_loss = None
             with accelerator.accumulate(text_encoder):
                 generator.manual_seed(config.seed)
-                pipeline = RectifiedFlowPipeline.from_pretrained(
-                    "XCLIU/instaflow_0_9B_from_sd_1_5",
-                    safety_checker=None,
-                    torch_dtype=weight_dtype,
-                    text_encoder=text_encoder,
-                    vae=vae,
-                    unet=unet,
-                    tokenizer=tokenizer,
-                    scheduler=scheduler,
-                ).to(device)
 
                 # generate image
                 image = pipeline(prompt=batch['texts'][0],
@@ -537,10 +552,12 @@ def trainv2(config: RunConfig):
 
                 pred_density1 = orig_output[0]
                 pred_density1 = pred_density1 / pred_density1.max()
-                mask = torch.sigmoid(100 * (pred_density1.unsqueeze(0) - 0.5))  # TODO was 0.7
-                mask_max = F.max_pool2d(mask, kernel_size=5, stride=5)
+                mask = torch.sigmoid(1000 * (pred_density1.unsqueeze(0) - 0.2))
+                mask_max = F.max_pool2d(mask, kernel_size=2, stride=2)
                 mask_max = mask_max.squeeze()
-                dfs(mask_max)
+
+                dfs_iterative(mask_max)
+
                 output = mask_max.sum()
 
                 if classification_loss is None:
@@ -586,7 +603,7 @@ def trainv2(config: RunConfig):
                     pred_density_write = cv2.applyColorMap(np.uint8(255 * pred_density_write), cv2.COLORMAP_JET)
                     pred_density_write = pred_density_write / 255.
                     img = TF.resize(image.detach(), (384)).squeeze(0).permute(1, 2, 0).cpu().numpy()
-                    heatmap_pred = 0.33 * img + 0.67 * pred_density_write
+                    heatmap_pred = 0 * img + 1 * pred_density_write
                     heatmap_pred = heatmap_pred / heatmap_pred.max()
                     utils.numpy_to_pil(
                         heatmap_pred
@@ -652,10 +669,11 @@ def trainv2(config: RunConfig):
                 optimizer.step()
                 optimizer.zero_grad()
 
+        print(f"End step duration: {(time.time() - step_start) / 60} minutes")
         if current_early_stopping < 0:
             break
 
-    print(f"End training time: {(time.time() - train_start)/60} minutes")
+    print(f"End train time: {(time.time() - train_start) / 60} minutes")
 
 def evaluate(config: RunConfig):
 
@@ -731,15 +749,12 @@ def evaluate(config: RunConfig):
 
 
 def run_experiments(config: RunConfig):
-    classes = ["oranges"]
+    classes = ["oranges","airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck"]
     intervals = [(0, 5), (5, 10), (10, 15), (15, 30)]
     scales = [90, 80, 70, 60]
-    seeds = [35, 1]
+    seeds = [35]
 
-    # classes = ["oranges"]
-    # intervals = [(1, 2)]
-    # scales = [90]
-    # seeds = [35]
+    classes = classes[0:3]
 
     start = time.time()
     for clazz in classes:
@@ -757,8 +772,8 @@ def run_experiments(config: RunConfig):
                             trainv2(config)
                         else:
                             train(config)
-                    except:
-                        print("train failed")
+                    except Exception as e:
+                        print(f"train failed on {e}")
 
     print(f"Overall experiment time: {(time.time()-start)/3600} hours")
 
@@ -785,7 +800,7 @@ def evaluate_experiments(config: RunConfig):
 
     df = pd.DataFrame(columns=['class', 'seed', 'amount', 'sd_count', 'sd_optimized_count'])
 
-    detected_optimized_amount = evaluate_experiment(model, image_processor,  "img.png", "oranges")
+    # detected_optimized_amount = evaluate_experiment(model, image_processor,  "img.png", "oranges")
     # Iterate over each subfolder inside the main folder
     for subfolder in os.listdir("img"):
 
@@ -793,7 +808,10 @@ def evaluate_experiments(config: RunConfig):
         if version not in subfolder:
             continue
 
-        clazz, amount, seed, v = subfolder.split('_')
+        if str(config.lr) not in subfolder:
+            continue
+
+        clazz, amount, seed, lr, v = subfolder.split('_')
         subfolder_path = os.path.join("img", subfolder, "train")
 
         detected_actual_amount = evaluate_experiment(model, image_processor, subfolder_path + "/actual.jpg", clazz)
@@ -825,7 +843,7 @@ def evaluate_experiments(config: RunConfig):
     avg_diff_per_seed = df.groupby('seed').agg({'sd_count_diff': 'mean', 'sd_optimized_count_diff': 'mean'})
     avg_sd_count_diff_norm = df['sd_count_diff_norm'].mean()
     avg_sd_optimized_count_diff_norm = df['sd_optimized_count_diff_norm'].mean()
-    avg_diff_per_seed_norm = df.groupby('seed').agg({'sd_count_diff_norm': 'mean', 'sd_optimized_count_diff_norm': 'mean'})
+    avg_diff_per_seed_norm = df.groupby(['class','seed']).agg({'sd_count_diff_norm': 'mean', 'sd_optimized_count_diff_norm': 'mean'})
 
     print("\n*** Average Difference Results ***\n")
     print(f"SD average difference: {avg_sd_count_diff}, normalized: {avg_sd_count_diff_norm}")
@@ -865,6 +883,33 @@ def dfs(matrix):
             if matrix[i][j] > 0.9:
                 visited[i][j] = True
                 dfs_rec(matrix, i, j, visited)
+
+def dfs_iterative(matrix):
+    num_rows = len(matrix)
+    num_cols = len(matrix[0])
+
+    visited = [[False] * num_cols for _ in range(num_rows)]
+    stack = []
+
+    steps = [0, 1, -1]
+
+    # Traverse the matrix
+    for i in range(num_rows):
+        for j in range(num_cols):
+            if matrix[i][j] > 0.9 and not visited[i][j]:
+                visited[i][j] = True
+                stack.append((i, j))
+
+                while stack:
+                    row, col = stack.pop()
+                    if not visited[row][col]:
+                        matrix[row][col] = 0
+                    visited[row][col] = True
+
+                    for x in steps:
+                        for y in steps:
+                            if is_valid(matrix, row + x, col + y, visited):
+                                    stack.append((row + x, col + y))
 
 if __name__ == "__main__":
 

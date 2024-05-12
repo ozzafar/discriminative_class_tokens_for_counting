@@ -38,7 +38,7 @@ class RunConfig:
     skip_exists: bool = False
 
     # Train and Optimization
-    lr: float = 0.005
+    lr: float = 0.01
     betas: tuple = field(default_factory=lambda: (0.9, 0.999))
     weight_decay: float = 1e-2
     eps: float = 1e-08
@@ -52,7 +52,7 @@ class RunConfig:
 
     # Discrimnative tokens
     placeholder_token: str = "newclas"
-    initializer_token: str = "a"
+    initializer_token: str = "some"
 
     # Path to save all outputs to
     output_path: Path = Path("results")

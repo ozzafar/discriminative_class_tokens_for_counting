@@ -1,4 +1,5 @@
 import time
+from math import sqrt
 
 import pandas as pd
 import torch
@@ -10,7 +11,7 @@ import itertools
 
 from PIL import Image
 from accelerate import Accelerator
-from diffusers import StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline, AutoPipelineForText2Image
 from torch import device
 from transformers import CLIPProcessor, CLIPModel, YolosForObjectDetection, YolosImageProcessor
 
@@ -56,21 +57,10 @@ def train(config: RunConfig):
     Path(img_dir_path).mkdir(parents=True, exist_ok=True)
 
     # Stable model
-    unet, vae, text_encoder, scheduler, tokenizer = utils.prepare_stable(config)
-
-    pipeline = RectifiedFlowPipeline.from_pretrained(
-        "XCLIU/instaflow_0_9B_from_sd_1_5",
-        safety_checker=None,
-        torch_dtype=torch.float32,
-        text_encoder=text_encoder,
-        vae=vae,
-        unet=unet,
-        tokenizer=tokenizer,
-        scheduler=scheduler
-    )
-
-    load_hf_hub_lora(pipeline, lora_path="Lykon/dreamshaper-7", save_dW=False, alpha=1.0)
-    pipeline.to(device)  ### if GPU is not available, comment this line
+    pipeline = AutoPipelineForText2Image.from_pretrained(
+        "stabilityai/sdxl-turbo",
+        torch_dtype=torch.float32
+    ).to(device)
 
     unet, vae, text_encoder, scheduler, tokenizer = pipeline.unet, pipeline.vae, pipeline.text_encoder, pipeline.scheduler, pipeline.tokenizer
 
@@ -214,13 +204,17 @@ def train(config: RunConfig):
                 generator.manual_seed(config.seed)
 
                 # generate image
+                t1 = time.time()
+                # generate image
                 image = pipeline(prompt=batch['texts'][0],
                                  num_inference_steps=1,
+                                 output_type="pt",
                                  height=config.height,
                                  width=config.width,
                                  generator=generator,
                                  guidance_scale=0.0
                                  ).images[0]
+                print(f"SDXL took {(time.time() - t1) / 60} minutes")
 
                 image = image.unsqueeze(0)
                 image_out = image
@@ -374,21 +368,10 @@ def trainv2(config: RunConfig):
     Path(img_dir_path).mkdir(parents=True, exist_ok=True)
 
     # Stable model
-    unet, vae, text_encoder, scheduler, tokenizer = utils.prepare_stable(config)
-
-    pipeline = RectifiedFlowPipeline.from_pretrained(
-        "XCLIU/instaflow_0_9B_from_sd_1_5",
-        safety_checker=None,
-        torch_dtype=torch.float32,
-        text_encoder=text_encoder,
-        vae=vae,
-        unet=unet,
-        tokenizer=tokenizer,
-        scheduler=scheduler
-    )
-
-    load_hf_hub_lora(pipeline, lora_path="Lykon/dreamshaper-7", save_dW=False, alpha=1.0)
-    pipeline.to(device)  ### if GPU is not available, comment this line
+    pipeline = AutoPipelineForText2Image.from_pretrained(
+        "stabilityai/sdxl-turbo",
+        torch_dtype=torch.float32
+    ).to(device)
 
     unet, vae, text_encoder, scheduler, tokenizer = pipeline.unet, pipeline.vae, pipeline.text_encoder, pipeline.scheduler, pipeline.tokenizer
 
@@ -552,7 +535,7 @@ def trainv2(config: RunConfig):
 
                 pred_density1 = orig_output[0]
                 pred_density1 = pred_density1 / pred_density1.max()
-                mask = torch.sigmoid(1000 * (pred_density1.unsqueeze(0) - 0.2))
+                mask = torch.sigmoid(100 * (pred_density1.unsqueeze(0) - 0.2))
                 mask_max = F.max_pool2d(mask, kernel_size=2, stride=2)
                 mask_max = mask_max.squeeze()
 
@@ -747,36 +730,6 @@ def evaluate(config: RunConfig):
                 0
             ].save(img_path, "JPEG")
 
-
-def run_experiments(config: RunConfig):
-    classes = ["oranges","airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck"]
-    intervals = [(0, 5), (5, 10), (10, 15), (15, 30)]
-    scales = [90, 80, 70, 60]
-    seeds = [35]
-
-    classes = classes[0:3]
-
-    start = time.time()
-    for clazz in classes:
-        for i, interval in enumerate(intervals):
-            scale = scales[i]
-            for amount in range(interval[0] + 1, interval[1] + 1):
-                for seed in seeds:
-                    print(f"*** Running experiment {clazz=},{amount=},{seed=}")
-                    config.clazz = clazz
-                    config.scale = scale
-                    config.amount = amount
-                    config.seed = seed
-                    try:
-                        if config.is_v2:
-                            trainv2(config)
-                        else:
-                            train(config)
-                    except Exception as e:
-                        print(f"train failed on {e}")
-
-    print(f"Overall experiment time: {(time.time()-start)/3600} hours")
-
 def evaluate_experiment(model, image_processor, image_path, clazz):
     count = 0
     image = Image.open(image_path)
@@ -851,6 +804,10 @@ def evaluate_experiments(config: RunConfig):
     print(f"differences per seed: {avg_diff_per_seed}")
     print(f"normalized differences per seed: {avg_diff_per_seed_norm}")
 
+    print(f"\nSD MAE: {df['sd_count_diff'].mean()}, Ours MAE: {df['sd_optimized_count_diff'].mean()}")
+    print(f"SD RMSE: {sqrt((df['sd_count_diff'] ** 2).mean())}, Ours RMSE: {sqrt((df['sd_optimized_count_diff'] ** 2).mean())}")
+    print(f"SD MAE-N: {df['sd_count_diff_norm'].mean()}, Ours MAE-N: {df['sd_optimized_count_diff_norm'].mean()}")
+
 def is_valid(matrix, row, col, visited):
     num_rows = len(matrix)
     num_cols = len(matrix[0])
@@ -910,6 +867,35 @@ def dfs_iterative(matrix):
                         for y in steps:
                             if is_valid(matrix, row + x, col + y, visited):
                                     stack.append((row + x, col + y))
+
+def run_experiments(config: RunConfig):
+    classes = ["oranges","airplanes","cars","birds","cats","deers","dogs","frogs","horses","ships","trucks"]
+    intervals = [(0, 5), (5, 10), (10, 15), (15, 30)]
+    scales = [90, 80, 70, 60]
+    seeds = [35]
+
+    classes = classes[0:3]
+
+    start = time.time()
+    for clazz in classes:
+        for i, interval in enumerate(intervals):
+            scale = scales[i]
+            for amount in range(interval[0] + 1, interval[1] + 1):
+                for seed in seeds:
+                    print(f"*** Running experiment {clazz=},{amount=},{seed=}")
+                    config.clazz = clazz
+                    config.scale = scale
+                    config.amount = amount
+                    config.seed = seed
+                    try:
+                        if config.is_v2:
+                            trainv2(config)
+                        else:
+                            train(config)
+                    except Exception as e:
+                        print(f"train failed on {e}")
+
+    print(f"Overall experiment time: {(time.time()-start)/3600} hours")
 
 if __name__ == "__main__":
 

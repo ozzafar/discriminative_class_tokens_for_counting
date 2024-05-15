@@ -4,7 +4,7 @@ from diffusers import (
     DDPMScheduler,
     PNDMScheduler,
     StableDiffusionPipeline,
-    UNet2DConditionModel,
+    UNet2DConditionModel, AutoPipelineForImage2Image, AutoPipelineForText2Image,
 )
 from transformers import CLIPTextModel, CLIPTokenizer
 import torchvision.transforms as T
@@ -87,7 +87,7 @@ def prepare_classifier(config):
 
 def prepare_stable(config):
     # Generative model
-    pretrained_model_name_or_path = "XCLIU/instaflow_0_9B_from_sd_1_5"
+    pretrained_model_name_or_path = "stabilityai/sdxl-turbo"
 
     unet = UNet2DConditionModel.from_pretrained(
         pretrained_model_name_or_path, subfolder="unet"
@@ -96,7 +96,7 @@ def prepare_stable(config):
         pretrained_model_name_or_path, subfolder="text_encoder"
     )
     vae = AutoencoderKL.from_pretrained(pretrained_model_name_or_path, subfolder="vae")
-    pipe = RectifiedFlowPipeline.from_pretrained(pretrained_model_name_or_path).to(
+    pipe = AutoPipelineForText2Image.from_pretrained(pretrained_model_name_or_path).to(
             "cuda"
     )
     scheduler = pipe.scheduler

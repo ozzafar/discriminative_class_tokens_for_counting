@@ -51,7 +51,7 @@ def train(config: RunConfig):
 
     class_name = f"{config.amount} {config.clazz}"
     print(f"Start training class token for {class_name}")
-    img_dir_path = f"img/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
+    img_dir_path = f"img/sdxl-turbo/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
     if Path(img_dir_path).exists():
         shutil.rmtree(img_dir_path)
     Path(img_dir_path).mkdir(parents=True, exist_ok=True)
@@ -362,7 +362,7 @@ def trainv2(config: RunConfig):
 
     class_name = f"{config.amount} {config.clazz}"
     print(f"Start training class token for {class_name}")
-    img_dir_path = f"img/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v2/train"
+    img_dir_path = f"img/sdxl-turbo/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v2/train"
     if Path(img_dir_path).exists():
         shutil.rmtree(img_dir_path)
     Path(img_dir_path).mkdir(parents=True, exist_ok=True)

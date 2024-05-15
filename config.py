@@ -24,7 +24,7 @@ class RunConfig:
     clazz:  str = "oranges"
 
     # Affect training time
-    early_stopping: int = 15
+    early_stopping: int = 10
     num_train_epochs: int = 50
 
     # affect variability of the training images

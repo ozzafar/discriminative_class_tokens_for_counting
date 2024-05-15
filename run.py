@@ -755,7 +755,7 @@ def evaluate_experiments(config: RunConfig):
 
     # detected_optimized_amount = evaluate_experiment(model, image_processor,  "img.png", "oranges")
     # Iterate over each subfolder inside the main folder
-    for subfolder in os.listdir("img"):
+    for subfolder in os.listdir("img/sdxl-turbo"):
 
         version = "v2" if config.is_v2 else "v1"
         if version not in subfolder:
@@ -866,15 +866,13 @@ def dfs_iterative(matrix):
                     for x in steps:
                         for y in steps:
                             if is_valid(matrix, row + x, col + y, visited):
-                                    stack.append((row + x, col + y))
+                                stack.append((row + x, col + y))
 
 def run_experiments(config: RunConfig):
     classes = ["oranges","airplanes","cars","birds","cats","deers","dogs","frogs","horses","ships","trucks"]
     intervals = [(0, 5), (5, 10), (10, 15), (15, 30)]
     scales = [90, 80, 70, 60]
     seeds = [35]
-
-    classes = classes[0:3]
 
     start = time.time()
     for clazz in classes:

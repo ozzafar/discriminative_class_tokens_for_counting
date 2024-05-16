@@ -1,17 +1,13 @@
 from PIL import Image
-from diffusers import (
-    AutoencoderKL,
-    DDPMScheduler,
-    PNDMScheduler,
-    StableDiffusionPipeline,
-    UNet2DConditionModel, AutoPipelineForImage2Image, AutoPipelineForText2Image,
-)
+
 from transformers import CLIPTextModel, CLIPTokenizer
 import torchvision.transforms as T
 import torch
 
 import kornia
 
+from diffusers.models import UNet2DConditionModel, AutoencoderKL
+from diffusers.pipelines import AutoPipelineForText2Image
 from insta_flow.code.pipeline_rf import RectifiedFlowPipeline
 
 # From timm.data.constants

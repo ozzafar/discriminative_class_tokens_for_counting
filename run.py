@@ -11,13 +11,12 @@ import itertools
 
 from PIL import Image
 from accelerate import Accelerator
-from diffusers.src.diffusers import AutoPipelineForText2Image
+from diffusers import AutoPipelineForText2Image
 from torch import device
 from transformers import CLIPProcessor, CLIPModel, YolosForObjectDetection, YolosImageProcessor
 
 import prompt_dataset
 import utils
-from insta_flow.code.pipeline_rf import RectifiedFlowPipeline
 import numpy as np
 import cv2
 import torchvision.transforms.functional as TF
@@ -26,8 +25,6 @@ import torch.nn.functional as F
 from config import RunConfig
 import pyrallis
 import shutil
-
-from insta_flow.code.rf_lora import load_hf_hub_lora
 
 
 def train(config: RunConfig):

@@ -11,7 +11,7 @@ import itertools
 
 from PIL import Image
 from accelerate import Accelerator
-from diffusers import StableDiffusionPipeline, AutoPipelineForText2Image
+from diffusers.src.diffusers import AutoPipelineForText2Image
 from torch import device
 from transformers import CLIPProcessor, CLIPModel, YolosForObjectDetection, YolosImageProcessor
 

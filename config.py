@@ -24,7 +24,7 @@ class RunConfig:
     clazz:  str = "oranges"
 
     # Affect training time
-    early_stopping: int = 10
+    early_stopping: int = 15
     num_train_epochs: int = 50
 
     # affect variability of the training images
@@ -38,7 +38,7 @@ class RunConfig:
     skip_exists: bool = False
 
     # Train and Optimization
-    lr: float = 0.01
+    lr: float = 0.05
     betas: tuple = field(default_factory=lambda: (0.9, 0.999))
     weight_decay: float = 1e-2
     eps: float = 1e-08

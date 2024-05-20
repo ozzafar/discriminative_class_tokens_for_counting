@@ -11,11 +11,14 @@ import itertools
 
 from PIL import Image
 from accelerate import Accelerator
+
+from classes_datasets import yolo_classes, fsc147_classes
+from diffusers.utils import load_image
 from torchvision.transforms import transforms
 
 from clip_count.run import Model
 from clip_count.util import misc
-from diffusers import AutoPipelineForText2Image
+from diffusers import AutoPipelineForText2Image, StableDiffusionXLControlNetPipeline, ControlNetModel
 from torch import device
 from transformers import CLIPProcessor, CLIPModel, YolosForObjectDetection, YolosImageProcessor
 
@@ -343,76 +346,45 @@ def train(config: RunConfig):
     print(f"End training time: {(time.time() - train_start) / 60} minutes")
 
 def evaluate(config: RunConfig):
-
-    classification_model = utils.prepare_classifier(config)
-
-    class_name = "7 oranges"
-
-    exp_identifier = (
-        f'{config.exp_id}_{"2.1" if config.sd_2_1 else "1.4"}_{config.epoch_size}_{config.lr}_'
-        f"{config.seed}_{config.number_of_prompts}_{config.early_stopping}_{config.num_of_SD_backpropagation_steps}"
-    )
-
+    print("Evaluation - print image with discriminatory tokens, then one without.")
     # Stable model
-    token_dir_path = f"token/{class_name}"
-    Path(token_dir_path).mkdir(parents=True, exist_ok=True)
-    pipe_path = f"pipeline_{token_dir_path}/{exp_identifier}_{class_name}"
-    pipe = StableDiffusionPipeline.from_pretrained(pipe_path).to(config.device)
+    pipe_path = f"pipeline_token/{config.amount}-{config.clazz}"
+    pipe = AutoPipelineForText2Image.from_pretrained(
+        pipe_path,
+        torch_dtype=torch.float16
+    ).to(device)
 
-    tokens_to_try = [config.placeholder_token]
-    # Create eval dir
-    img_dir_path = f"img/{class_name}/eval"
-    if Path(img_dir_path).exists():
-        print("Img path exists {img_dir_path}")
-        if config.skip_exists:
-            print("baseline exists - skip it. Set 'skip_exists' to False regenerate.")
-        else:
-            shutil.rmtree(img_dir_path)
-            tokens_to_try.append(config.initializer_token)
-    else:
-        tokens_to_try.append(config.initializer_token)
+    print(f"{pipe_path=}")
 
-    Path(img_dir_path).mkdir(parents=True, exist_ok=True)
-    prompt_suffix = " ".join(class_name.lower().split("_"))
+    generator = torch.Generator(device=config.device)  # Seed generator to create the initial latent noise
 
-    for descriptive_token in tokens_to_try:
-        correct = 0
-        prompt = f"A photo of {descriptive_token} {prompt_suffix}"
+    for descriptive_token in [config.placeholder_token, "some"]:
+        generator.manual_seed(config.seed)
+        prompt = f"A photo of {descriptive_token} {int(config.amount)} {config.clazz}"
         print(f"Evaluation for the prompt: {prompt}")
 
-        for seed in range(config.test_size):
-            if descriptive_token == config.initializer_token:
-                img_id = f"{img_dir_path}/{seed}_{descriptive_token}_{prompt_suffix}"
-                if os.path.exists(f"{img_id}_correct.jpg") or os.path.exists(
-                        f"{img_id}_wrong.jpg"
-                ):
-                    print(f"Image exists {img_id} - skip generation")
-                    if os.path.exists(f"{img_id}_correct.jpg"):
-                        correct += 1
-                    continue
-            generator = torch.Generator(
-                device=config.device
-            )  # Seed generator to create the inital latent noise
-            generator.manual_seed(seed)
-            image_out = pipe(prompt, output_type="pt", generator=generator)[0]
-            image = utils.transform_img_tensor(image_out, config)
+        with torch.no_grad():
+            image_out = pipe(prompt=prompt,
+                             num_inference_steps=1,
+                             output_type="pt",
+                             height=config.height,
+                             width=config.width,
+                             generator=generator,
+                             guidance_scale=0.0
+                             ).images[0]
+            # image = utils.transform_img_tensor(image_out, config)
 
-            output = classification_model(image).logits
-            pred_class = torch.argmax(output).item()
+        img_dir_path = f"img/eval"
+        if Path(img_dir_path).exists():
+            shutil.rmtree(img_dir_path)
+        Path(img_dir_path).mkdir(parents=True, exist_ok=True)
 
-            if descriptive_token == config.initializer_token:
-                img_path = (
-                    f"{img_dir_path}/{seed}_{descriptive_token}_{prompt_suffix}"
-                    f"_{'correct' if pred_class == config.class_index else 'wrong'}.jpg"
-                )
-            else:
-                img_path = (
-                    f"{img_dir_path}/{seed}_{exp_identifier}_7 oranges.jpg"
-                )
-
-            utils.numpy_to_pil(image_out.permute(0, 2, 3, 1).cpu().detach().numpy())[
-                0
-            ].save(img_path, "JPEG")
+        utils.numpy_to_pil(
+            image_out.unsqueeze(0).permute(0, 2, 3, 1).cpu().detach().numpy()
+        )[0].save(
+            f"{img_dir_path}/{prompt}.jpg",
+            "JPEG",
+        )
 
 class EvaluationConfig:
     def __init__(self, yolo_model, yolo_processor, clip_count_model):
@@ -476,7 +448,8 @@ def evaluate_experiments(config: RunConfig):
 
     # detected_optimized_amount = evaluate_experiment(model,  "img_7.png", "oranges")
     # Iterate over each subfolder inside the main folder
-    for subfolder in os.listdir("img/sdxl-turbo-fsc147-not-up"):
+    folder = "sdxl-turbo-fsc147-not-up" if not config.is_controlnet else "controlnet"
+    for subfolder in os.listdir(f"img/{folder}"):
 
         version = "v2" if config.is_v2 else "v1"
         if version not in subfolder:
@@ -487,7 +460,7 @@ def evaluate_experiments(config: RunConfig):
 
         is_yolo, detected_actual_amount2, detected_optimized_amount2 = False, -1, -1
         clazz, amount, seed, lr, v = subfolder.split('_')
-        subfolder_path = os.path.join("img", "sdxl-turbo-fsc147-not-up", subfolder, "train")
+        subfolder_path = os.path.join("img", folder, subfolder, "train")
 
         detected_actual_amount = clipcount_evaluate_experiment(eval_config.clip_count_model, subfolder_path + "/actual.jpg", clazz)
         detected_optimized_amount = clipcount_evaluate_experiment(eval_config.clip_count_model, subfolder_path + "/optimized.jpg", clazz)
@@ -521,58 +494,84 @@ def evaluate_experiments(config: RunConfig):
     print(f"\nSD MAE (yolo): {df[df['is_yolo']==True]['sd_count_diff2'].mean()}, Ours MAE: {df[df['is_yolo']==True]['sd_optimized_count_diff2'].mean()}")
     print(f"SD RMSE (yolo): {sqrt((df[df['is_yolo']==True]['sd_count_diff2'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_yolo']==True]['sd_optimized_count_diff2'] ** 2).mean())}")
 
-def dfs_iterative(matrix):
-    num_rows = len(matrix)
-    num_cols = len(matrix[0])
+    print(f"\nSD MAE (clipcount on overlap with yolo): {df[df['is_yolo']==True]['sd_count_diff'].mean()}, Ours MAE: {df[df['is_yolo']==True]['sd_optimized_count_diff'].mean()}")
+    print(f"SD RMSE (clipcount on overlap with yolo): {sqrt((df[df['is_yolo']==True]['sd_count_diff'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_yolo']==True]['sd_optimized_count_diff'] ** 2).mean())}")
 
-    visited = [[False] * num_cols for _ in range(num_rows)]
-    stack = []
 
-    steps = [0, 1, -1]
+# def run_experiments(config: RunConfig):
+#     experiments = [(3,"birds"),(5,"bowls"),(5,"chairs"),(5,"cups"),(10,"oranges"),(12,"cars"),(25,"grapes"),(25,"macroons"),(25,"pigeons"),(25,"see shells")]
+#     for experiment in experiments:
+#         amount, clazz = experiment[0],experiment[1]
+#         config.amount=amount
+#         config.clazz=clazz
+#         train(config)
 
-    # Traverse the matrix
-    for i in range(num_rows):
-        for j in range(num_cols):
-            if matrix[i][j] > 0.9 and not visited[i][j]:
-                visited[i][j] = True
-                stack.append((i, j))
+def run_controlnet(pipe, config):
+    prompt = f"high resolution image of {config.amount} balls"
+    negative_prompt = "low quality, bad quality, sketches"
 
-                while stack:
-                    row, col = stack.pop()
-                    if not visited[row][col]:
-                        matrix[row][col] = 0
-                    visited[row][col] = True
+    # download an image
+    image = load_image(
+        f"controlnet\\{config.amount}_dots.png"
+    )
 
-                    for x in steps:
-                        for y in steps:
-                            if is_valid(matrix, row + x, col + y, visited):
-                                stack.append((row + x, col + y))
+    # get canny image
+    image = np.array(image)
+    image = cv2.Canny(image, 100, 200)
+    image = image[:, :, None]
+    image = np.concatenate([image, image, image], axis=2)
+    canny_image = Image.fromarray(image)
+
+    # generate image
+    controlnet_conditioning_scale = 0.5  # recommended for good generalization
+    image = pipe(
+        prompt, controlnet_conditioning_scale=controlnet_conditioning_scale, image=canny_image, height=512, width=512
+    ).images[0]
+
+    image.show()
+    dir_name = f"img/controlnet/{config.clazz}_{config.seed}_{config.lr}_v1/train"
+    if not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+    image.save(f"{dir_name}/optimized.jpg")
 
 def run_experiments(config: RunConfig):
-    classes = ["balls", "sea shells", "hot air balloons", "peppers", "bread rolls", "tomatoes", "geese", "seagulls",
-               "peaches",
-               "grapes", "watermelon", "beads", "candles", "oysters", "penguins", "strawberries", "pigeons",
-               "macarons", "crows", "flamingos", "cranes", "boxes", "stamps", "watches", "bowls", "apples", "shoes",
-               "windows", "cassettes", "ants", "birds", "books", "cups", "fishes", "people", "alcohol bottles",
-               "bricks", "bottle caps", "plates", "comic books", "skateboard", "sheep", "buffaloes", "markers",
-               "roof tiles", "pills", "keyboard keys", "carrom board pieces", "pencils", "coins", "boats", "elephants",
-               "sunglasses", "cows", "pens", "stapler pins", "camels", "horses", "lipstick", "spoon", "bottles",
-               "deers", "cement bags", "go game", "oranges", "cans", "chairs", "caps", "shirts", "jeans", "mini blinds",
-               "zebras", "naan bread", "nuts", "crab cakes", "bees", "coffee beans", "gemstones", "cashew nuts", "buns",
-               "kidney beans", "crayons", "matches", "bullets", "finger foods", "clams", "cotton balls", "cupcake tray",
-               "green peas", "onion rings", "polka dots", "instant noodles", "red beans", "m&m pieces",
-               "baguette rolls", "chicken wings", "ice cream", "meat skewers", "kitchen towels", "jade stones",
-               "toilet paper rolls", "candy pieces", "spring rolls", "chewing gum pieces", "pearls", "donuts tray",
-               "cupcakes", "lighters", "stairs", "shallots", "potatoes", "screws", "goldfish snack", "marbles",
-               "polka dot tiles", "rice bags", "oyster shells", "mosaic tiles", "prawn crackers", "supermarket shelf",
-               "sausages", "potato chips", "calamari rings", "biscuits", "croissants", "nails", "skis", "goats",
-               "swans", "bananas", "kiwis", "tree logs", "eggs", "cars", "birthday candles", "sauce bottles", "cereals",
-               "fresh cut", "milk cartons", "sticky notes", "nail polish", "cartridges", "legos", "flower pots",
-               "flowers", "straws", "chopstick"]
+    # TODO stopped in calamari rings
+    # classes = ["balls", "sea shells", "hot air balloons", "peppers", "bread rolls", "tomatoes", "geese", "seagulls",
+    #            "peaches",
+    #            "grapes", "watermelon", "beads", "candles", "oysters", "penguins", "strawberries", "pigeons",
+    #            "macarons", "crows", "flamingos", "cranes", "boxes", "stamps", "watches", "bowls", "apples", "shoes",
+    #            "windows", "cassettes", "ants", "birds", "books", "cups", "fishes", "people", "alcohol bottles",
+    #            "bricks", "bottle caps", "plates", "comic books", "skateboard", "sheep", "buffaloes", "markers",
+    #            "roof tiles", "pills", "keyboard keys", "carrom board pieces", "pencils", "coins", "boats", "elephants",
+    #            "sunglasses", "cows", "pens", "stapler pins", "camels", "horses", "lipstick", "spoon", "bottles",
+    #            "deers", "cement bags", "go game", "oranges", "cans", "chairs", "caps", "shirts", "jeans", "mini blinds",
+    #            "zebras", "naan bread", "nuts", "crab cakes", "bees", "coffee beans", "gemstones", "cashew nuts", "buns",
+    #            "kidney beans", "crayons", "matches", "bullets", "finger foods", "clams", "cotton balls", "cupcake tray",
+    #            "green peas", "onion rings", "polka dots", "instant noodles", "red beans", "m&m pieces",
+    #            "baguette rolls", "chicken wings", "ice cream", "meat skewers", "kitchen towels", "jade stones",
+    #            "toilet paper rolls", "candy pieces", "spring rolls", "chewing gum pieces", "pearls", "donuts tray",
+    #            "cupcakes", "lighters", "stairs", "shallots", "potatoes", "screws", "goldfish snack", "marbles",
+    #            "polka dot tiles", "rice bags", "oyster shells", "mosaic tiles", "prawn crackers", "supermarket shelf",
+    #            "sausages", "potato chips", "calamari rings", "biscuits", "croissants", "nails", "skis", "goats",
+    #            "swans", "bananas", "kiwis", "tree logs", "eggs", "cars", "birthday candles", "sauce bottles", "cereals",
+    #            "fresh cut", "milk cartons", "sticky notes", "nail polish", "cartridges", "legos", "flower pots",
+    #            "flowers", "straws", "chopstick"]
 
+    classes = list(set(yolo_classes)-set(fsc147_classes))
     amounts = [5, 15, 25]
     seeds = [35]
     scale = 60
+
+    if config.is_controlnet:
+        # initialize the models and pipeline
+        controlnet = ControlNetModel.from_pretrained(
+            "diffusers/controlnet-canny-sdxl-1.0", torch_dtype=torch.float32
+        )
+        # vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float32)
+        pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
+            "stabilityai/sdxl-turbo", controlnet=controlnet, torch_dtype=torch.float32
+        )
+        pipe.enable_model_cpu_offload()
 
     start = time.time()
     for clazz in classes:
@@ -584,7 +583,10 @@ def run_experiments(config: RunConfig):
                 config.amount = amount
                 config.seed = seed
                 try:
-                    train(config)
+                    if config.is_controlnet:
+                        run_controlnet(pipe, config)
+                    else:
+                        train(config)
                 except Exception as e:
                     print(f"train failed on {e}")
 

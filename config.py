@@ -11,6 +11,7 @@ class RunConfig:
     evaluate_experiment: bool
 
     is_v2: bool = False
+    is_controlnet: bool = False
 
     # Id of the experiment
     exp_id: str = "demo"

@@ -12,7 +12,7 @@ import itertools
 from PIL import Image
 from accelerate import Accelerator
 
-from classes_datasets import yolo_classes, fsc147_classes
+from datasets.classes_datasets import yolo_classes, fsc147_classes
 from diffusers.utils import load_image
 from torchvision.transforms import transforms
 
@@ -20,14 +20,13 @@ from clip_count.run import Model
 from clip_count.util import misc
 from diffusers import AutoPipelineForText2Image, StableDiffusionXLControlNetPipeline, ControlNetModel
 from torch import device
-from transformers import CLIPProcessor, CLIPModel, YolosForObjectDetection, YolosImageProcessor
+from transformers import YolosForObjectDetection, YolosImageProcessor
 
-import prompt_dataset
+from datasets import prompt_dataset
 import utils
 import numpy as np
 import cv2
 import torchvision.transforms.functional as TF
-import torch.nn.functional as F
 
 from config import RunConfig
 import pyrallis
@@ -509,6 +508,8 @@ def evaluate_experiments(config: RunConfig):
 def run_controlnet(pipe, config):
     prompt = f"high resolution image of {config.amount} balls"
     negative_prompt = "low quality, bad quality, sketches"
+
+    print(f"Running ControlNet with prompt: {prompt}")
 
     # download an image
     image = load_image(

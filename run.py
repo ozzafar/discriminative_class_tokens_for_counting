@@ -460,7 +460,7 @@ def evaluate_experiments(config: RunConfig):
         is_yolo, detected_actual_amount2, detected_optimized_amount2 = False, -1, -1
         clazz, amount, seed, lr, v = subfolder.split('_')
         subfolder_path = os.path.join("img", folder, subfolder, "train")
-        is_clipcount = clazz[:-1] in fsc147_classes
+        is_clipcount = clazz in fsc147_classes
 
         detected_actual_amount = clipcount_evaluate_experiment(eval_config.clip_count_model, subfolder_path + "/actual.jpg", clazz)
         detected_optimized_amount = clipcount_evaluate_experiment(eval_config.clip_count_model, subfolder_path + "/optimized.jpg", clazz)
@@ -488,15 +488,11 @@ def evaluate_experiments(config: RunConfig):
 
     print("\n*** Results ***\n")
 
-    print(f"\nSD MAE (clipcount): {df['sd_count_diff'].mean()}, Ours MAE: {df['sd_optimized_count_diff'].mean()}")
-    print(f"SD RMSE (clipcount): {sqrt((df['sd_count_diff'] ** 2).mean())}, Ours RMSE: {sqrt((df['sd_optimized_count_diff'] ** 2).mean())}")
+    print(f"\nSD MAE (clipcount): {df[df['is_clipcount']==True]['sd_count_diff'].mean()}, Ours MAE: {df[df['is_clipcount']==True]['sd_optimized_count_diff'].mean()}")
+    print(f"SD RMSE (clipcount): {sqrt((df[df['is_clipcount']==True]['sd_count_diff'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_clipcount']==True]['sd_optimized_count_diff'] ** 2).mean())}")
 
     print(f"\nSD MAE (yolo): {df[df['is_yolo']==True]['sd_count_diff2'].mean()}, Ours MAE: {df[df['is_yolo']==True]['sd_optimized_count_diff2'].mean()}")
     print(f"SD RMSE (yolo): {sqrt((df[df['is_yolo']==True]['sd_count_diff2'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_yolo']==True]['sd_optimized_count_diff2'] ** 2).mean())}")
-
-    print(f"\nSD MAE (clipcount on overlap with yolo): {df[df['is_yolo']==True]['sd_count_diff'].mean()}, Ours MAE: {df[df['is_yolo']==True]['sd_optimized_count_diff'].mean()}")
-    print(f"SD RMSE (clipcount on overlap with yolo): {sqrt((df[df['is_yolo']==True]['sd_count_diff'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_yolo']==True]['sd_optimized_count_diff'] ** 2).mean())}")
-
 
 # def run_experiments(config: RunConfig):
 #     experiments = [(3,"birds"),(5,"bowls"),(5,"chairs"),(5,"cups"),(10,"oranges"),(12,"cars"),(25,"grapes"),(25,"macroons"),(25,"pigeons"),(25,"see shells")]
@@ -507,7 +503,7 @@ def evaluate_experiments(config: RunConfig):
 #         train(config)
 
 def run_controlnet(pipe, config):
-    prompt = f"high resolution image of {config.amount} balls"
+    prompt = f"a realistic high resolution image of {config.amount} {config.clazz}"
     negative_prompt = "low quality, bad quality, sketches"
 
     print(f"Running ControlNet with prompt: {prompt}")
@@ -534,7 +530,7 @@ def run_controlnet(pipe, config):
     dir_name = f"img/controlnet/{config.clazz}_{config.seed}_{config.lr}_v1/train"
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
-    image.save(f"{dir_name}/optimized.jpg")
+    image.save(f"{dir_name}/{config.amount}_{config.clazz}_controlnet.jpg")
 
 def run_experiments(config: RunConfig):
     # TODO stopped in calamari rings
@@ -559,7 +555,7 @@ def run_experiments(config: RunConfig):
     #            "fresh cut", "milk cartons", "sticky notes", "nail polish", "cartridges", "legos", "flower pots",
     #            "flowers", "straws", "chopstick"]
 
-    classes = yolo_classes
+    classes = fsc147_classes
     amounts = [5, 15, 25]
     seeds = [35]
     scale = 60

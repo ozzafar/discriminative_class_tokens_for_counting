@@ -443,7 +443,7 @@ def evaluate_experiments(config: RunConfig):
 
     eval_config = EvaluationConfig(yolo, yolo_image_processor, clipcount)
 
-    df = pd.DataFrame(columns=['class', 'seed', 'amount', 'sd_count', 'sd_optimized_count', 'is_yolo', 'sd_count2', 'sd_optimized_count2'])
+    df = pd.DataFrame(columns=['class', 'seed', 'amount', 'sd_count', 'sd_optimized_count', 'is_clipcount','is_yolo', 'sd_count2', 'sd_optimized_count2'])
 
     # detected_optimized_amount = evaluate_experiment(model,  "img_7.png", "oranges")
     # Iterate over each subfolder inside the main folder
@@ -460,6 +460,7 @@ def evaluate_experiments(config: RunConfig):
         is_yolo, detected_actual_amount2, detected_optimized_amount2 = False, -1, -1
         clazz, amount, seed, lr, v = subfolder.split('_')
         subfolder_path = os.path.join("img", folder, subfolder, "train")
+        is_clipcount = clazz[:-1] in fsc147_classes
 
         detected_actual_amount = clipcount_evaluate_experiment(eval_config.clip_count_model, subfolder_path + "/actual.jpg", clazz)
         detected_optimized_amount = clipcount_evaluate_experiment(eval_config.clip_count_model, subfolder_path + "/optimized.jpg", clazz)
@@ -469,7 +470,7 @@ def evaluate_experiments(config: RunConfig):
             detected_actual_amount2 = yolo_evaluate_experiment(eval_config.yolo_model, eval_config.yolo_processor, subfolder_path + "/actual.jpg", clazz)
             detected_optimized_amount2 = yolo_evaluate_experiment(eval_config.yolo_model, eval_config.yolo_processor, subfolder_path + "/optimized.jpg", clazz)
 
-        new_row = {'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount, 'is_yolo' : is_yolo, 'sd_count2': detected_actual_amount2, 'sd_optimized_count2': detected_optimized_amount2 }
+        new_row = {'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount, 'is_clipcount' : is_clipcount, 'is_yolo' : is_yolo, 'sd_count2': detected_actual_amount2, 'sd_optimized_count2': detected_optimized_amount2 }
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
     dir_name = "experiments"
@@ -513,7 +514,7 @@ def run_controlnet(pipe, config):
 
     # download an image
     image = load_image(
-        f"controlnet\\{config.amount}_dots.png"
+        f"controlnet/{config.amount}_dots.png"
     )
 
     # get canny image
@@ -558,20 +559,22 @@ def run_experiments(config: RunConfig):
     #            "fresh cut", "milk cartons", "sticky notes", "nail polish", "cartridges", "legos", "flower pots",
     #            "flowers", "straws", "chopstick"]
 
-    classes = list(set(yolo_classes)-set(fsc147_classes))
+    classes = yolo_classes
     amounts = [5, 15, 25]
     seeds = [35]
     scale = 60
+
+    print(f"{classes=}")
 
     if config.is_controlnet:
         # initialize the models and pipeline
         controlnet = ControlNetModel.from_pretrained(
             "diffusers/controlnet-canny-sdxl-1.0", torch_dtype=torch.float32
-        )
+        ).to(device)
         # vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float32)
         pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
             "stabilityai/sdxl-turbo", controlnet=controlnet, torch_dtype=torch.float32
-        )
+        ).to(device)
         pipe.enable_model_cpu_offload()
 
     start = time.time()
@@ -579,7 +582,7 @@ def run_experiments(config: RunConfig):
         for amount in amounts:
             for seed in seeds:
                 print(f"*** Running experiment {clazz=},{amount=},{seed=}")
-                config.clazz = clazz
+                config.clazz = (clazz+"s") if clazz in yolo_classes else clazz
                 config.scale = scale
                 config.amount = amount
                 config.seed = seed

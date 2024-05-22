@@ -20,7 +20,7 @@ from clip_count.run import Model
 from clip_count.util import misc
 from diffusers import AutoPipelineForText2Image, StableDiffusionXLControlNetPipeline, ControlNetModel
 from torch import device
-from transformers import YolosForObjectDetection, YolosImageProcessor
+from transformers import YolosForObjectDetection, YolosImageProcessor, AutoModel, AutoProcessor, pipeline
 
 from datasets import prompt_dataset
 import utils
@@ -347,7 +347,7 @@ def train(config: RunConfig):
 def evaluate(config: RunConfig):
     print("Evaluation - print image with discriminatory tokens, then one without.")
     # Stable model
-    pipe_path = f"pipeline_token/{config.amount}-{config.clazz}"
+    pipe_path = f"pipeline_token/{config.amount} {config.clazz}"
     pipe = AutoPipelineForText2Image.from_pretrained(
         pipe_path,
         torch_dtype=torch.float16
@@ -374,8 +374,6 @@ def evaluate(config: RunConfig):
             # image = utils.transform_img_tensor(image_out, config)
 
         img_dir_path = f"img/eval"
-        if Path(img_dir_path).exists():
-            shutil.rmtree(img_dir_path)
         Path(img_dir_path).mkdir(parents=True, exist_ok=True)
 
         utils.numpy_to_pil(
@@ -384,12 +382,6 @@ def evaluate(config: RunConfig):
             f"{img_dir_path}/{prompt}.jpg",
             "JPEG",
         )
-
-class EvaluationConfig:
-    def __init__(self, yolo_model, yolo_processor, clip_count_model):
-        self.yolo_model = yolo_model
-        self.yolo_processor = yolo_processor
-        self.clip_count_model = clip_count_model
 
 def yolo_evaluate_experiment(model, image_processor, image_path, clazz):
     count = 0
@@ -406,6 +398,14 @@ def yolo_evaluate_experiment(model, image_processor, image_path, clazz):
             count += 1
 
     return count
+
+def siglip_score(siglip_pipeline, image_path, amount, clazz):
+    image = Image.open(image_path)
+
+    outputs = siglip_pipeline(image, candidate_labels=[f"a photo of {amount} {clazz}"])
+    score = round(outputs[0]["score"], 4)
+
+    return score
 
 def clipcount_evaluate_experiment(model, image_path, clazz):
     image = Image.open(image_path)
@@ -430,7 +430,7 @@ def clipcount_evaluate_experiment(model, image_path, clazz):
         # crop to original width
         output = output[:, :, :raw_w]
 
-        pred_cnt = torch.sum(output[0] / 60).item()
+        pred_cnt = torch.sum(output[0] / 70).item()
 
     return pred_cnt
 
@@ -440,10 +440,9 @@ def evaluate_experiments(config: RunConfig):
     yolo_image_processor = YolosImageProcessor.from_pretrained("hustvl/yolos-tiny")
     clipcount = Model.load_from_checkpoint("clipcount_pretrained.ckpt", strict=False).cuda()
     clipcount.eval()
+    siglip_pipeline = pipeline(task="zero-shot-image-classification", model="google/siglip-base-patch16-256-i18n")
 
-    eval_config = EvaluationConfig(yolo, yolo_image_processor, clipcount)
-
-    df = pd.DataFrame(columns=['class', 'seed', 'amount', 'sd_count', 'sd_optimized_count', 'is_clipcount','is_yolo', 'sd_count2', 'sd_optimized_count2'])
+    df = pd.DataFrame(columns=['class', 'seed', 'amount', 'sd_count', 'sd_optimized_count', 'is_clipcount','is_yolo', 'sd_count2', 'sd_optimized_count2','actual_relevance_score','optimized_relevance_score'])
 
     # detected_optimized_amount = evaluate_experiment(model,  "img_7.png", "oranges")
     # Iterate over each subfolder inside the main folder
@@ -462,15 +461,26 @@ def evaluate_experiments(config: RunConfig):
         subfolder_path = os.path.join("img", folder, subfolder, "train")
         is_clipcount = clazz in fsc147_classes
 
-        detected_actual_amount = clipcount_evaluate_experiment(eval_config.clip_count_model, subfolder_path.replace(folder,"sdxl-turbo-fsc147-not-up") + "/actual.jpg", clazz)
-        detected_optimized_amount = clipcount_evaluate_experiment(eval_config.clip_count_model, subfolder_path + "/optimized.jpg", clazz)
+        path_actual = subfolder_path.replace(folder,"sdxl-turbo-fsc147-not-up") + "/actual.jpg"
+        path_optimized = subfolder_path + "/optimized.jpg"
+
+        detected_actual_amount = clipcount_evaluate_experiment(clipcount, path_actual, clazz)
+        detected_optimized_amount = clipcount_evaluate_experiment(clipcount, path_optimized, clazz)
 
         if clazz[:-1] in yolo.config.id2label.values():
             is_yolo = True
-            detected_actual_amount2 = yolo_evaluate_experiment(eval_config.yolo_model, eval_config.yolo_processor, subfolder_path.replace(folder,"sdxl-turbo-fsc147-not-up") + "/actual.jpg", clazz)
-            detected_optimized_amount2 = yolo_evaluate_experiment(eval_config.yolo_model, eval_config.yolo_processor, subfolder_path + "/optimized.jpg", clazz)
+            detected_actual_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_actual, clazz)
+            detected_optimized_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_optimized, clazz)
 
-        new_row = {'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount, 'is_clipcount' : is_clipcount, 'is_yolo' : is_yolo, 'sd_count2': detected_actual_amount2, 'sd_optimized_count2': detected_optimized_amount2 }
+        actual_relevance_score = siglip_score(siglip_pipeline, path_actual, amount, clazz)
+        optimized_relevance_score = siglip_score(siglip_pipeline, path_optimized, amount, clazz)
+
+        new_row = {
+            'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount,
+            'is_clipcount' : is_clipcount, 'is_yolo' : is_yolo, 'sd_count2': detected_actual_amount2, 'sd_optimized_count2': detected_optimized_amount2,
+            'actual_relevance_score': actual_relevance_score, 'optimized_relevance_score' :optimized_relevance_score
+        }
+
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
     dir_name = "experiments"
@@ -491,12 +501,15 @@ def evaluate_experiments(config: RunConfig):
     df=df[df['is_clipcount']==True]
 
     print(f"\nSD MAE (clipcount): {df[df['is_clipcount']==True]['sd_count_diff'].mean()}, Ours MAE: {df[df['is_clipcount']==True]['sd_optimized_count_diff'].mean()}")
-    print(f"SD RMSE (clipcount): {sqrt((df[df['is_clipcount']==True]['sd_count_diff'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_clipcount']==True]['sd_optimized_count_diff'] ** 2).mean())}")
-    print(f"\nSD MAE (clipcount): {df[df['is_clipcount']==True].groupby('amount').agg({'sd_count_diff': 'mean', 'sd_optimized_count_diff': 'mean'})}")
+    print(f"\nSD RMSE (clipcount): {sqrt((df[df['is_clipcount']==True]['sd_count_diff'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_clipcount']==True]['sd_optimized_count_diff'] ** 2).mean())}")
+    print(f"\nMAE (clipcount): {df[df['is_clipcount']==True].groupby('amount').agg({'sd_count_diff': 'mean', 'sd_optimized_count_diff': 'mean'})}")
 
     print(f"\nSD MAE (yolo): {df[df['is_yolo']==True]['sd_count_diff2'].mean()}, Ours MAE: {df[df['is_yolo']==True]['sd_optimized_count_diff2'].mean()}")
-    print(f"SD RMSE (yolo): {sqrt((df[df['is_yolo']==True]['sd_count_diff2'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_yolo']==True]['sd_optimized_count_diff2'] ** 2).mean())}")
-    print(f"\nSD MAE (yolo): {df[df['is_yolo']==True].groupby('amount').agg({'sd_count_diff2':'mean','sd_optimized_count_diff2':'mean'})}")
+    print(f"\nSD RMSE (yolo): {sqrt((df[df['is_yolo']==True]['sd_count_diff2'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_yolo']==True]['sd_optimized_count_diff2'] ** 2).mean())}")
+    print(f"\nMAE (yolo): {df[df['is_yolo']==True].groupby('amount').agg({'sd_count_diff2':'mean','sd_optimized_count_diff2':'mean'})}")
+
+    print(f"\nSD Relevance Score: {df[df['is_clipcount']==True]['actual_relevance_score'].mean()}, Ours Relevance Score: {df[df['is_clipcount']==True]['optimized_relevance_score'].mean()}")
+    print(f"\nRelevance Score: {df[df['is_clipcount']==True].groupby('amount').agg({'actual_relevance_score':'mean','optimized_relevance_score':'mean'})}")
 
 # def run_experiments(config: RunConfig):
 #     experiments = [(3,"birds"),(5,"bowls"),(5,"chairs"),(5,"cups"),(10,"oranges"),(12,"cars"),(25,"grapes"),(25,"macroons"),(25,"pigeons"),(25,"see shells")]

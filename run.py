@@ -400,7 +400,7 @@ def yolo_evaluate_experiment(model, image_processor, image_path, clazz):
 
     # print results
     target_sizes = torch.tensor([image.size[::-1]])
-    results = image_processor.post_process_object_detection(outputs, threshold=0.5, target_sizes=target_sizes)[0]
+    results = image_processor.post_process_object_detection(outputs, threshold=0.3, target_sizes=target_sizes)[0]
     for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
         if model.config.id2label[label.item()] == clazz[:-1]:
             count += 1
@@ -462,12 +462,12 @@ def evaluate_experiments(config: RunConfig):
         subfolder_path = os.path.join("img", folder, subfolder, "train")
         is_clipcount = clazz in fsc147_classes
 
-        detected_actual_amount = clipcount_evaluate_experiment(eval_config.clip_count_model, subfolder_path + "/actual.jpg", clazz)
+        detected_actual_amount = clipcount_evaluate_experiment(eval_config.clip_count_model, subfolder_path.replace(folder,"sdxl-turbo-fsc147-not-up") + "/actual.jpg", clazz)
         detected_optimized_amount = clipcount_evaluate_experiment(eval_config.clip_count_model, subfolder_path + "/optimized.jpg", clazz)
 
         if clazz[:-1] in yolo.config.id2label.values():
             is_yolo = True
-            detected_actual_amount2 = yolo_evaluate_experiment(eval_config.yolo_model, eval_config.yolo_processor, subfolder_path + "/actual.jpg", clazz)
+            detected_actual_amount2 = yolo_evaluate_experiment(eval_config.yolo_model, eval_config.yolo_processor, subfolder_path.replace(folder,"sdxl-turbo-fsc147-not-up") + "/actual.jpg", clazz)
             detected_optimized_amount2 = yolo_evaluate_experiment(eval_config.yolo_model, eval_config.yolo_processor, subfolder_path + "/optimized.jpg", clazz)
 
         new_row = {'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount, 'is_clipcount' : is_clipcount, 'is_yolo' : is_yolo, 'sd_count2': detected_actual_amount2, 'sd_optimized_count2': detected_optimized_amount2 }
@@ -488,11 +488,15 @@ def evaluate_experiments(config: RunConfig):
 
     print("\n*** Results ***\n")
 
+    df=df[df['is_clipcount']==True]
+
     print(f"\nSD MAE (clipcount): {df[df['is_clipcount']==True]['sd_count_diff'].mean()}, Ours MAE: {df[df['is_clipcount']==True]['sd_optimized_count_diff'].mean()}")
     print(f"SD RMSE (clipcount): {sqrt((df[df['is_clipcount']==True]['sd_count_diff'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_clipcount']==True]['sd_optimized_count_diff'] ** 2).mean())}")
+    print(f"\nSD MAE (clipcount): {df[df['is_clipcount']==True].groupby('amount').agg({'sd_count_diff': 'mean', 'sd_optimized_count_diff': 'mean'})}")
 
     print(f"\nSD MAE (yolo): {df[df['is_yolo']==True]['sd_count_diff2'].mean()}, Ours MAE: {df[df['is_yolo']==True]['sd_optimized_count_diff2'].mean()}")
     print(f"SD RMSE (yolo): {sqrt((df[df['is_yolo']==True]['sd_count_diff2'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_yolo']==True]['sd_optimized_count_diff2'] ** 2).mean())}")
+    print(f"\nSD MAE (yolo): {df[df['is_yolo']==True].groupby('amount').agg({'sd_count_diff2':'mean','sd_optimized_count_diff2':'mean'})}")
 
 # def run_experiments(config: RunConfig):
 #     experiments = [(3,"birds"),(5,"bowls"),(5,"chairs"),(5,"cups"),(10,"oranges"),(12,"cars"),(25,"grapes"),(25,"macroons"),(25,"pigeons"),(25,"see shells")]
@@ -527,10 +531,10 @@ def run_controlnet(pipe, config):
     ).images[0]
 
     image.show()
-    dir_name = f"img/controlnet/{config.clazz}_{config.seed}_{config.lr}_v1/train"
+    dir_name = f"img/controlnet/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
-    image.save(f"{dir_name}/{config.amount}_{config.clazz}_controlnet.jpg")
+    image.save(f"{dir_name}/optimized.jpg")
 
 def run_experiments(config: RunConfig):
     # TODO stopped in calamari rings

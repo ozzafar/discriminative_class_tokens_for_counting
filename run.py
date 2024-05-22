@@ -20,7 +20,8 @@ from clip_count.run import Model
 from clip_count.util import misc
 from diffusers import AutoPipelineForText2Image, StableDiffusionXLControlNetPipeline, ControlNetModel
 from torch import device
-from transformers import YolosForObjectDetection, YolosImageProcessor, AutoModel, AutoProcessor, pipeline
+from transformers import YolosForObjectDetection, YolosImageProcessor, AutoModel, AutoProcessor, pipeline, \
+    CLIPProcessor, CLIPModel
 
 from datasets import prompt_dataset
 import utils
@@ -399,14 +400,22 @@ def yolo_evaluate_experiment(model, image_processor, image_path, clazz):
 
     return count
 
-def siglip_score(siglip_pipeline, image_path, amount, clazz):
+# def siglip_score(siglip_pipeline, image_path, amount, clazz):
+#     image = Image.open(image_path)
+#
+#     outputs = siglip_pipeline(image, candidate_labels=[f"a photo of {amount} {clazz}"])
+#     score = round(outputs[0]["score"], 4)
+#
+#     return score
+
+def clip_score(model, processor, image_path, amount, clazz):
     image = Image.open(image_path)
 
-    outputs = siglip_pipeline(image, candidate_labels=[f"a photo of {amount} {clazz}"])
-    score = round(outputs[0]["score"], 4)
+    inputs = processor(text=[f"a photo of {amount} {clazz}"], images = image, return_tensors="pt", padding=True).to("cuda")
+    outputs = model(**inputs)
+    score = round(outputs[0][0].item()/100, 4)
 
     return score
-
 def clipcount_evaluate_experiment(model, image_path, clazz):
     image = Image.open(image_path)
     transform = transforms.Compose([
@@ -440,7 +449,8 @@ def evaluate_experiments(config: RunConfig):
     yolo_image_processor = YolosImageProcessor.from_pretrained("hustvl/yolos-tiny")
     clipcount = Model.load_from_checkpoint("clipcount_pretrained.ckpt", strict=False).cuda()
     clipcount.eval()
-    siglip_pipeline = pipeline(task="zero-shot-image-classification", model="google/siglip-base-patch16-256-i18n")
+    clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+    clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
 
     df = pd.DataFrame(columns=['class', 'seed', 'amount', 'sd_count', 'sd_optimized_count', 'is_clipcount','is_yolo', 'sd_count2', 'sd_optimized_count2','actual_relevance_score','optimized_relevance_score'])
 
@@ -472,8 +482,8 @@ def evaluate_experiments(config: RunConfig):
             detected_actual_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_actual, clazz)
             detected_optimized_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_optimized, clazz)
 
-        actual_relevance_score = siglip_score(siglip_pipeline, path_actual, amount, clazz)
-        optimized_relevance_score = siglip_score(siglip_pipeline, path_optimized, amount, clazz)
+        actual_relevance_score = clip_score(clip, clip_processor, path_actual, amount, clazz)
+        optimized_relevance_score = clip_score(clip, clip_processor, path_optimized, amount, clazz)
 
         new_row = {
             'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount,

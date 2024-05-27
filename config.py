@@ -9,6 +9,7 @@ class RunConfig:
     evaluate: bool
     experiment: bool
     evaluate_experiment: bool
+    experiment_name: str
 
     is_v2: bool = False
     is_controlnet: bool = False

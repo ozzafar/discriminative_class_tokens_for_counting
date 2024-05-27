@@ -55,7 +55,7 @@ def train(config: RunConfig):
 
     class_name = f"{config.amount} {config.clazz}"
     print(f"Start training class token for {class_name}")
-    img_dir_path = f"img/sdxl-turbo-fsc147-not-up/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
+    img_dir_path = f"img/{config.experiment_name}/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
     if Path(img_dir_path).exists():
         shutil.rmtree(img_dir_path)
     Path(img_dir_path).mkdir(parents=True, exist_ok=True)
@@ -322,12 +322,14 @@ def train(config: RunConfig):
                         # Create the pipeline using the trained modules and save it.
                         accelerator.wait_for_everyone()
                         if accelerator.is_main_process:
+                            img_path = f"{img_dir_path}/optimized.jpg"
+                            utils.numpy_to_pil(image_out.permute(0, 2, 3, 1).cpu().detach().numpy())[0].save(img_path,"JPEG")
+                            accelerator.unwrap_model(
+                                pipeline.text_encoder
+                            ).save_pretrained(f"pipeline_{token_path}")
                             print(
                                 f"Saved the new discriminative class token pipeline of {class_name} to pipeline_{token_path}"
                             )
-                            img_path = f"{img_dir_path}/optimized.jpg"
-                            utils.numpy_to_pil(image_out.permute(0, 2, 3, 1).cpu().detach().numpy())[0].save(img_path,"JPEG")
-                            # pipeline.save_pretrained(f"pipeline_{token_path}") # TODO unwrap text encoder accelerator
                     else:
                         current_early_stopping -= 1
                     print(
@@ -456,7 +458,7 @@ def evaluate_experiments(config: RunConfig):
 
     # detected_optimized_amount = evaluate_experiment(model,  "img_7.png", "oranges")
     # Iterate over each subfolder inside the main folder
-    folder = "sdxl-turbo-fsc147-not-up" if not config.is_controlnet else "controlnet"
+    folder = config.experiment_name
     for subfolder in os.listdir(f"img/{folder}"):
 
         version = "v2" if config.is_v2 else "v1"
@@ -471,7 +473,7 @@ def evaluate_experiments(config: RunConfig):
         subfolder_path = os.path.join("img", folder, subfolder, "train")
         is_clipcount = clazz in fsc147_classes
 
-        path_actual = subfolder_path.replace(folder,"sdxl-turbo-fsc147-not-up") + "/actual.jpg"
+        path_actual = subfolder_path + "/actual.jpg" # for controlnet use something else
         path_optimized = subfolder_path + "/optimized.jpg"
 
         detected_actual_amount = clipcount_evaluate_experiment(clipcount, path_actual, clazz)

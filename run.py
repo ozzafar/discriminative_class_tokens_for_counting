@@ -28,6 +28,8 @@ import utils
 import numpy as np
 import cv2
 import torchvision.transforms.functional as TF
+from groundingdino.util.inference import load_model, load_image, predict, annotate
+import cv2
 
 from config import RunConfig
 import pyrallis
@@ -40,8 +42,8 @@ def train(config: RunConfig):
 
     classification_model = utils.prepare_classifier(config)
     # TODO move to prepare_clip
-    # processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-    # clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
+    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+    clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
 
     train_start = time.time()
 
@@ -240,12 +242,12 @@ def train(config: RunConfig):
                         output, torch.HalfTensor([class_infer]).cuda()
                     ) / torch.HalfTensor([1]).cuda()
 
-                # text_inputs = processor(text=prompt, return_tensors="pt", padding=True).to(accelerator.device)
-                # inputs = {**text_inputs, "pixel_values": image}
-                # clip_output = (clip(**inputs)[0][0] / 100).cuda()
-                # clip_output = config._lambda * (1 - clip_output)
+                text_inputs = processor(text=prompt, return_tensors="pt", padding=True).to(accelerator.device)
+                inputs = {**text_inputs, "pixel_values": image}
+                clip_output = (clip(**inputs)[0][0] / 100).cuda()
+                clip_output = config._lambda * (1 - clip_output)
 
-                # classification_loss += clip_output
+                classification_loss += clip_output
 
                 total_loss += classification_loss.detach().item()
 
@@ -402,13 +404,28 @@ def yolo_evaluate_experiment(model, image_processor, image_path, clazz):
 
     return count
 
-# def siglip_score(siglip_pipeline, image_path, amount, clazz):
-#     image = Image.open(image_path)
-#
-#     outputs = siglip_pipeline(image, candidate_labels=[f"a photo of {amount} {clazz}"])
-#     score = round(outputs[0]["score"], 4)
-#
-#     return score
+def dino_evaluate_experiment(model, image_path, clazz):
+    BOX_TRESHOLD = 0.35
+    TEXT_TRESHOLD = 0.25
+
+    image_source, image = load_image(image_path)
+
+    boxes, logits, phrases = predict(
+        model=model,
+        image=image,
+        caption=clazz,
+        box_threshold=BOX_TRESHOLD,
+        text_threshold=TEXT_TRESHOLD
+    )
+
+    return len(boxes)
+def siglip_score(siglip_pipeline, image_path, amount, clazz):
+    image = Image.open(image_path)
+
+    outputs = siglip_pipeline(image, candidate_labels=[f"a photo of {amount} {clazz}"])
+    score = round(outputs[0]["score"], 4)
+
+    return score
 
 def clip_score(model, processor, image_path, amount, clazz):
     image = Image.open(image_path)
@@ -453,8 +470,12 @@ def evaluate_experiments(config: RunConfig):
     clipcount.eval()
     clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
     clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
+    dino = load_model("GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
+                       "GroundingDINO/weights/groundingdino_swint_ogc.pth")
 
-    df = pd.DataFrame(columns=['class', 'seed', 'amount', 'sd_count', 'sd_optimized_count', 'is_clipcount','is_yolo', 'sd_count2', 'sd_optimized_count2','actual_relevance_score','optimized_relevance_score'])
+    df = pd.DataFrame(columns=['class', 'seed', 'amount', 'sd_count', 'sd_optimized_count', 'is_clipcount','is_yolo',
+                               'sd_count2', 'sd_optimized_count2','actual_relevance_score','optimized_relevance_score',
+                               'sd_count3', 'sd_optimized_count3'])
 
     # detected_optimized_amount = evaluate_experiment(model,  "img_7.png", "oranges")
     # Iterate over each subfolder inside the main folder
@@ -473,11 +494,16 @@ def evaluate_experiments(config: RunConfig):
         subfolder_path = os.path.join("img", folder, subfolder, "train")
         is_clipcount = clazz in fsc147_classes
 
+        print(f"evaluating {clazz=} {amount=}")
+
         path_actual = subfolder_path + "/actual.jpg" # for controlnet use something else
         path_optimized = subfolder_path + "/optimized.jpg"
 
         detected_actual_amount = clipcount_evaluate_experiment(clipcount, path_actual, clazz)
         detected_optimized_amount = clipcount_evaluate_experiment(clipcount, path_optimized, clazz)
+
+        detected_actual_amount_dino = dino_evaluate_experiment(dino, path_actual, clazz)
+        detected_optimized_amount_dino = dino_evaluate_experiment(dino, path_optimized, clazz)
 
         if clazz[:-1] in yolo.config.id2label.values():
             is_yolo = True
@@ -490,7 +516,8 @@ def evaluate_experiments(config: RunConfig):
         new_row = {
             'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount,
             'is_clipcount' : is_clipcount, 'is_yolo' : is_yolo, 'sd_count2': detected_actual_amount2, 'sd_optimized_count2': detected_optimized_amount2,
-            'actual_relevance_score': actual_relevance_score, 'optimized_relevance_score' :optimized_relevance_score
+            'actual_relevance_score': actual_relevance_score, 'optimized_relevance_score' :optimized_relevance_score,
+            'sd_count3': detected_actual_amount_dino, 'sd_optimized_count3': detected_optimized_amount_dino
         }
 
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
@@ -505,6 +532,8 @@ def evaluate_experiments(config: RunConfig):
     df['sd_optimized_count_diff'] = abs(df['sd_optimized_count'] - df['amount'])
     df['sd_count_diff2'] = abs(df['sd_count2'] - df['amount'])
     df['sd_optimized_count_diff2'] = abs(df['sd_optimized_count2'] - df['amount'])
+    df['sd_count_diff3'] = abs(df['sd_count3'] - df['amount'])
+    df['sd_optimized_count_diff3'] = abs(df['sd_optimized_count3'] - df['amount'])
 
     df.to_pickle(experiment_path)
 
@@ -515,6 +544,10 @@ def evaluate_experiments(config: RunConfig):
     print(f"\nSD MAE (clipcount): {df[df['is_clipcount']==True]['sd_count_diff'].mean()}, Ours MAE: {df[df['is_clipcount']==True]['sd_optimized_count_diff'].mean()}")
     print(f"\nSD RMSE (clipcount): {sqrt((df[df['is_clipcount']==True]['sd_count_diff'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_clipcount']==True]['sd_optimized_count_diff'] ** 2).mean())}")
     print(f"\nMAE (clipcount): {df[df['is_clipcount']==True].groupby('amount').agg({'sd_count_diff': 'mean', 'sd_optimized_count_diff': 'mean'})}")
+
+    print(f"\nSD MAE (dino): {df[df['is_clipcount']==True]['sd_count_diff3'].mean()}, Ours MAE: {df[df['is_clipcount']==True]['sd_optimized_count_diff3'].mean()}")
+    print(f"\nSD RMSE (dino): {sqrt((df[df['is_clipcount']==True]['sd_count_diff3'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_clipcount']==True]['sd_optimized_count_diff3'] ** 2).mean())}")
+    print(f"\nMAE (dino): {df[df['is_clipcount']==True].groupby('amount').agg({'sd_count_diff3': 'mean', 'sd_optimized_count_diff3': 'mean'})}")
 
     print(f"\nSD MAE (yolo): {df[df['is_yolo']==True]['sd_count_diff2'].mean()}, Ours MAE: {df[df['is_yolo']==True]['sd_optimized_count_diff2'].mean()}")
     print(f"\nSD RMSE (yolo): {sqrt((df[df['is_yolo']==True]['sd_count_diff2'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_yolo']==True]['sd_optimized_count_diff2'] ** 2).mean())}")

@@ -20,7 +20,7 @@ class RunConfig:
     # the classifier (Options: inet (ImageNet), inat (iNaturalist), cub (CUB200))
     classifier: str = "clip-count"
 
-    _lambda: float = 1
+    _lambda: float = 10
     scale: float = 70
     amount: float = 7
     clazz:  str = "oranges"

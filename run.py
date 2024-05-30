@@ -21,7 +21,7 @@ from clip_count.util import misc
 from diffusers import AutoPipelineForText2Image, StableDiffusionXLControlNetPipeline, ControlNetModel
 from torch import device
 from transformers import YolosForObjectDetection, YolosImageProcessor, AutoModel, AutoProcessor, pipeline, \
-    CLIPProcessor, CLIPModel
+    CLIPProcessor, CLIPModel, CLIPTextModel
 
 from datasets import prompt_dataset
 import utils
@@ -352,20 +352,25 @@ def train(config: RunConfig):
 def evaluate(config: RunConfig):
     print("Evaluation - print image with discriminatory tokens, then one without.")
     # Stable model
-    pipe_path = f"pipeline_token/{config.amount} {config.clazz}"
+    text_encoder_path = f"pipeline_token/{config.amount} {config.clazz}"
+    text_encoder = CLIPTextModel.from_pretrained(
+        text_encoder_path
+    )
+
     pipe = AutoPipelineForText2Image.from_pretrained(
-        pipe_path,
-        torch_dtype=torch.float16
+        pretrained_model_or_path="stabilityai/sdxl-turbo",
+        text_encoder=text_encoder,
+        torch_dtype=torch.float32
     ).to(device)
 
-    print(f"{pipe_path=}")
+    print(f"{text_encoder_path=}")
 
     generator = torch.Generator(device=config.device)  # Seed generator to create the initial latent noise
 
     for descriptive_token in [config.placeholder_token, "some"]:
         generator.manual_seed(config.seed)
         prompt = f"A photo of {descriptive_token} {int(config.amount)} {config.clazz}"
-        print(f"Evaluation for the prompt: {prompt}")
+        print(f"Evaluation with {config.diffusion_steps} steps for the prompt:\n {prompt}")
 
         with torch.no_grad():
             image_out = pipe(prompt=prompt,
@@ -599,7 +604,7 @@ def run_controlnet(pipe, config):
         os.makedirs(dir_name)
     image.save(f"{dir_name}/optimized.jpg")
 
-def run_few_steps_experiment(config: RunConfig):
+def evaluate_tokens(config: RunConfig):
     classes = fsc147_classes
     amounts = [5, 15, 25]
 
@@ -670,5 +675,5 @@ if __name__ == "__main__":
         run_experiments(config)
     if config.evaluate_experiment:
         evaluate_experiments(config)
-    if config.few_steps_experiment:
-        run_few_steps_experiment(config)
+    if config.evaluate_tokens:
+        evaluate_tokens(config)

@@ -10,7 +10,7 @@ class RunConfig:
     experiment: bool
     evaluate_experiment: bool
     experiment_name: str
-    few_steps_experiment: str
+    evaluate_tokens: str
 
     is_v2: bool = False
     is_controlnet: bool = False

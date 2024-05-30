@@ -10,6 +10,7 @@ class RunConfig:
     experiment: bool
     evaluate_experiment: bool
     experiment_name: str
+    few_steps_experiment: str
 
     is_v2: bool = False
     is_controlnet: bool = False
@@ -24,6 +25,8 @@ class RunConfig:
     scale: float = 70
     amount: float = 7
     clazz:  str = "oranges"
+
+    diffusion_steps:  int = 1
 
     # Affect training time
     early_stopping: int = 15

@@ -257,8 +257,8 @@ def train(config: RunConfig):
                     txt += f"{batch['texts']} \n"
                     txt += f"{output.item()=} \n"
                     txt += f"Loss: {classification_loss.detach().item()} \n"
-                    # txt += f"Clip-Count loss: {classification_loss.detach().item() - clip_output.detach().item()} \n"
-                    # txt += f"Clip loss: {clip_output.detach().item()}"
+                    txt += f"Clip-Count loss: {classification_loss.detach().item() - clip_output.detach().item()} \n"
+                    txt += f"Clip loss: {clip_output.detach().item()}"
                     with open("run_log.txt", "a") as f:
                         print(txt, file=f)
                     print(txt)
@@ -369,7 +369,7 @@ def evaluate(config: RunConfig):
 
         with torch.no_grad():
             image_out = pipe(prompt=prompt,
-                             num_inference_steps=1,
+                             num_inference_steps=config.diffusion_steps,
                              output_type="pt",
                              height=config.height,
                              width=config.width,
@@ -378,7 +378,7 @@ def evaluate(config: RunConfig):
                              ).images[0]
             # image = utils.transform_img_tensor(image_out, config)
 
-        img_dir_path = f"img/eval"
+        img_dir_path = f"img/{config.experiment_name}_eval"
         Path(img_dir_path).mkdir(parents=True, exist_ok=True)
 
         utils.numpy_to_pil(
@@ -405,8 +405,8 @@ def yolo_evaluate_experiment(model, image_processor, image_path, clazz):
     return count
 
 def dino_evaluate_experiment(model, image_path, clazz):
-    BOX_TRESHOLD = 0.35
-    TEXT_TRESHOLD = 0.25
+    BOX_TRESHOLD = 0.1
+    TEXT_TRESHOLD = 0.1
 
     image_source, image = load_image(image_path)
 
@@ -468,6 +468,7 @@ def evaluate_experiments(config: RunConfig):
     yolo_image_processor = YolosImageProcessor.from_pretrained("hustvl/yolos-tiny")
     clipcount = Model.load_from_checkpoint("clipcount_pretrained.ckpt", strict=False).cuda()
     clipcount.eval()
+    siglip_pipeline = pipeline(task="zero-shot-image-classification", model="google/siglip-base-patch16-256-i18n")
     clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
     clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
     dino = load_model("GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
@@ -496,6 +497,8 @@ def evaluate_experiments(config: RunConfig):
 
         print(f"evaluating {clazz=} {amount=}")
 
+        clazz = clazz[:-1]
+
         path_actual = subfolder_path + "/actual.jpg" # for controlnet use something else
         path_optimized = subfolder_path + "/optimized.jpg"
 
@@ -505,13 +508,15 @@ def evaluate_experiments(config: RunConfig):
         detected_actual_amount_dino = dino_evaluate_experiment(dino, path_actual, clazz)
         detected_optimized_amount_dino = dino_evaluate_experiment(dino, path_optimized, clazz)
 
-        if clazz[:-1] in yolo.config.id2label.values():
+        if clazz in yolo.config.id2label.values():
             is_yolo = True
             detected_actual_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_actual, clazz)
             detected_optimized_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_optimized, clazz)
 
         actual_relevance_score = clip_score(clip, clip_processor, path_actual, amount, clazz)
         optimized_relevance_score = clip_score(clip, clip_processor, path_optimized, amount, clazz)
+        # actual_relevance_score = siglip_score(siglip_pipeline, path_actual, amount, clazz)
+        # optimized_relevance_score = siglip_score(siglip_pipeline, path_optimized, amount, clazz)
 
         new_row = {
             'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount,
@@ -589,34 +594,29 @@ def run_controlnet(pipe, config):
     ).images[0]
 
     image.show()
-    dir_name = f"img/controlnet/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
+    dir_name = f"img/controlnet_{config.diffusion_steps}/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
     image.save(f"{dir_name}/optimized.jpg")
 
-def run_experiments(config: RunConfig):
-    # TODO stopped in calamari rings
-    # classes = ["balls", "sea shells", "hot air balloons", "peppers", "bread rolls", "tomatoes", "geese", "seagulls",
-    #            "peaches",
-    #            "grapes", "watermelon", "beads", "candles", "oysters", "penguins", "strawberries", "pigeons",
-    #            "macarons", "crows", "flamingos", "cranes", "boxes", "stamps", "watches", "bowls", "apples", "shoes",
-    #            "windows", "cassettes", "ants", "birds", "books", "cups", "fishes", "people", "alcohol bottles",
-    #            "bricks", "bottle caps", "plates", "comic books", "skateboard", "sheep", "buffaloes", "markers",
-    #            "roof tiles", "pills", "keyboard keys", "carrom board pieces", "pencils", "coins", "boats", "elephants",
-    #            "sunglasses", "cows", "pens", "stapler pins", "camels", "horses", "lipstick", "spoon", "bottles",
-    #            "deers", "cement bags", "go game", "oranges", "cans", "chairs", "caps", "shirts", "jeans", "mini blinds",
-    #            "zebras", "naan bread", "nuts", "crab cakes", "bees", "coffee beans", "gemstones", "cashew nuts", "buns",
-    #            "kidney beans", "crayons", "matches", "bullets", "finger foods", "clams", "cotton balls", "cupcake tray",
-    #            "green peas", "onion rings", "polka dots", "instant noodles", "red beans", "m&m pieces",
-    #            "baguette rolls", "chicken wings", "ice cream", "meat skewers", "kitchen towels", "jade stones",
-    #            "toilet paper rolls", "candy pieces", "spring rolls", "chewing gum pieces", "pearls", "donuts tray",
-    #            "cupcakes", "lighters", "stairs", "shallots", "potatoes", "screws", "goldfish snack", "marbles",
-    #            "polka dot tiles", "rice bags", "oyster shells", "mosaic tiles", "prawn crackers", "supermarket shelf",
-    #            "sausages", "potato chips", "calamari rings", "biscuits", "croissants", "nails", "skis", "goats",
-    #            "swans", "bananas", "kiwis", "tree logs", "eggs", "cars", "birthday candles", "sauce bottles", "cereals",
-    #            "fresh cut", "milk cartons", "sticky notes", "nail polish", "cartridges", "legos", "flower pots",
-    #            "flowers", "straws", "chopstick"]
+def run_few_steps_experiment(config: RunConfig):
+    classes = fsc147_classes
+    amounts = [5, 15, 25]
 
+    start = time.time()
+    for clazz in classes:
+        for amount in amounts:
+            print(f"*** Running experiment {clazz=},{amount=}")
+            config.clazz = (clazz+"s") if clazz in yolo_classes else clazz
+            config.amount = amount
+            try:
+                evaluate(config)
+            except Exception as e:
+                print(f"train failed on {e}")
+
+    print(f"Overall experiment time: {(time.time() - start) / 3600} hours")
+
+def run_experiments(config: RunConfig):
     classes = fsc147_classes
     amounts = [5, 15, 25]
     seeds = [35]
@@ -631,7 +631,7 @@ def run_experiments(config: RunConfig):
         ).to(device)
         # vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch.float32)
         pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
-            "stabilityai/sdxl-turbo", controlnet=controlnet, torch_dtype=torch.float32
+            "stabilityai/sdxl-turbo", controlnet=controlnet, torch_dtype=torch.float32, num_inference_steps=config.diffusion_steps
         ).to(device)
         pipe.enable_model_cpu_offload()
 
@@ -670,3 +670,5 @@ if __name__ == "__main__":
         run_experiments(config)
     if config.evaluate_experiment:
         evaluate_experiments(config)
+    if config.few_steps_experiment:
+        run_few_steps_experiment(config)

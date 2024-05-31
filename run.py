@@ -192,7 +192,7 @@ def train(config: RunConfig):
     min_loss = 99999
 
     # Define token output dir
-    token_dir_path = f"token/{class_name}"
+    token_dir_path = f"token/{config.experiment_name}/{class_name}"
     Path(token_dir_path).mkdir(parents=True, exist_ok=True)
     token_path = f"{token_dir_path}/{exp_identifier}_{class_name}"
 
@@ -352,7 +352,7 @@ def train(config: RunConfig):
 def evaluate(config: RunConfig):
     print("Evaluation - print image with discriminatory tokens, then one without.")
     # Stable model
-    text_encoder_path = f"pipeline_token/{config.amount} {config.clazz}"
+    text_encoder_path = f"pipeline_token/{config.amount} {config.clazz}/{config.epoch_size}_{config.lr}_{config.seed}_{config.number_of_prompts}_{config.early_stopping}_v1_{config.amount} {config.clazz}"
     text_encoder = CLIPTextModel.from_pretrained(
         text_encoder_path
     )
@@ -366,8 +366,9 @@ def evaluate(config: RunConfig):
     print(f"{text_encoder_path=}")
 
     generator = torch.Generator(device=config.device)  # Seed generator to create the initial latent noise
+    generator.manual_seed(config.seed)
 
-    for descriptive_token in [config.placeholder_token, "some"]:
+    for i,descriptive_token in enumerate(["some", config.placeholder_token]):
         generator.manual_seed(config.seed)
         prompt = f"A photo of {descriptive_token} {int(config.amount)} {config.clazz}"
         print(f"Evaluation with {config.diffusion_steps} steps for the prompt:\n {prompt}")
@@ -383,13 +384,13 @@ def evaluate(config: RunConfig):
                              ).images[0]
             # image = utils.transform_img_tensor(image_out, config)
 
-        img_dir_path = f"img/{config.experiment_name}_eval"
+        img_dir_path = f"img/{config.experiment_name}-eval/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
         Path(img_dir_path).mkdir(parents=True, exist_ok=True)
 
         utils.numpy_to_pil(
             image_out.unsqueeze(0).permute(0, 2, 3, 1).cpu().detach().numpy()
         )[0].save(
-            f"{img_dir_path}/{prompt}.jpg",
+            f"{img_dir_path}/{'actual' if i == 0 else 'optimized'}.jpg",
             "JPEG",
         )
 
@@ -649,13 +650,10 @@ def run_experiments(config: RunConfig):
                 config.scale = scale
                 config.amount = amount
                 config.seed = seed
-                try:
-                    if config.is_controlnet:
-                        run_controlnet(pipe, config)
-                    else:
-                        train(config)
-                except Exception as e:
-                    print(f"train failed on {e}")
+                if config.is_controlnet:
+                    run_controlnet(pipe, config)
+                else:
+                    train(config)
 
     print(f"Overall experiment time: {(time.time() - start) / 3600} hours")
 

@@ -10,7 +10,7 @@ class RunConfig:
     experiment: bool
     evaluate_experiment: bool
     experiment_name: str
-    evaluate_tokens: str
+    evaluate_tokens: bool
 
     is_v2: bool = False
     is_controlnet: bool = False
@@ -56,7 +56,7 @@ class RunConfig:
     width: int = 512
 
     # Discrimnative tokens
-    placeholder_token: str = "newclas"
+    placeholder_token: str = "some"
     initializer_token: str = "some"
 
     # Path to save all outputs to

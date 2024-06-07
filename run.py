@@ -1,6 +1,7 @@
 import time
 from math import sqrt
 
+import PIL
 import pandas as pd
 import torch
 
@@ -82,23 +83,25 @@ def train(config: RunConfig):
             " `placeholder_token` that is not already in the tokenizer."
         )
 
-    ## Get token ids for our placeholder and initializer token.
-    # This code block will complain if initializer string is not a single token
-    ## Convert the initializer_token, placeholder_token to ids
-    token_ids = tokenizer.encode(config.initializer_token, add_special_tokens=False)
-    # Check if initializer_token is a single token or a sequence of tokens
-    if len(token_ids) > 1:
-        raise ValueError("The initializer token must be a single token.")
+    # ## Get token ids for our placeholder and initializer token.
+    # # This code block will complain if initializer string is not a single token
+    # ## Convert the initializer_token, placeholder_token to ids
+    # token_ids = tokenizer.encode(config.initializer_token, add_special_tokens=False)
+    # # Check if initializer_token is a single token or a sequence of tokens
+    # if len(token_ids) > 1:
+    #     raise ValueError("The initializer token must be a single token.")
+    #
+    # initializer_token_id = token_ids[0]
+    # placeholder_token_id = tokenizer.convert_tokens_to_ids(config.placeholder_token)
+    #
+    # # we resize the token embeddings here to account for placeholder_token
+    # text_encoder.resize_token_embeddings(len(tokenizer))
+    #
+    # #  Initialise the newly added placeholder token
+    # token_embeds = text_encoder.get_input_embeddings().weight.data
+    # token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
 
-    initializer_token_id = token_ids[0]
-    placeholder_token_id = tokenizer.convert_tokens_to_ids(config.placeholder_token)
-
-    # we resize the token embeddings here to account for placeholder_token
-    text_encoder.resize_token_embeddings(len(tokenizer))
-
-    #  Initialise the newly added placeholder token
-    token_embeds = text_encoder.get_input_embeddings().weight.data
-    token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
+    placeholder_token_id = tokenizer.encode(config.placeholder_token, add_special_tokens=False)[0]
 
     # Define dataloades
 
@@ -193,8 +196,8 @@ def train(config: RunConfig):
 
     # Define token output dir
     token_dir_path = f"token/{config.experiment_name}/{class_name}"
-    Path(token_dir_path).mkdir(parents=True, exist_ok=True)
     token_path = f"{token_dir_path}/{exp_identifier}_{class_name}"
+    Path(token_path).mkdir(parents=True, exist_ok=True)
 
     #### Training loop ####
     for epoch in range(config.num_train_epochs):
@@ -326,12 +329,9 @@ def train(config: RunConfig):
                         if accelerator.is_main_process:
                             img_path = f"{img_dir_path}/optimized.jpg"
                             utils.numpy_to_pil(image_out.permute(0, 2, 3, 1).cpu().detach().numpy())[0].save(img_path,"JPEG")
-                            accelerator.unwrap_model(
-                                pipeline.text_encoder
-                            ).save_pretrained(f"pipeline_{token_path}")
-                            print(
-                                f"Saved the new discriminative class token pipeline of {class_name} to pipeline_{token_path}"
-                            )
+                            token_embeds = text_encoder.get_input_embeddings().weight.data
+                            torch.save(token_embeds[placeholder_token_id], f"{token_path}/token_embeds.pt")
+                            print(f"Saved the new discriminative class token pipeline of {class_name} to pipeline_{token_path}")
                     else:
                         current_early_stopping -= 1
                     print(
@@ -352,25 +352,25 @@ def train(config: RunConfig):
 def evaluate(config: RunConfig):
     print("Evaluation - print image with discriminatory tokens, then one without.")
     # Stable model
-    text_encoder_path = f"pipeline_token/{config.amount} {config.clazz}/{config.epoch_size}_{config.lr}_{config.seed}_{config.number_of_prompts}_{config.early_stopping}_v1_{config.amount} {config.clazz}"
-    text_encoder = CLIPTextModel.from_pretrained(
-        text_encoder_path
-    )
+    token_path = f"token/{config.experiment_name}/{config.amount} {config.clazz}/{config.epoch_size}_{config.lr}_{config.seed}_{config.number_of_prompts}_{config.early_stopping}_v1_{config.amount} {config.clazz}"
+    loaded_embeds = torch.load(f'{token_path}/token_embeds.pt')
 
     pipe = AutoPipelineForText2Image.from_pretrained(
         pretrained_model_or_path="stabilityai/sdxl-turbo",
-        text_encoder=text_encoder,
         torch_dtype=torch.float32
     ).to(device)
 
-    print(f"{text_encoder_path=}")
+    placeholder_token_id = pipe.tokenizer.encode(config.placeholder_token, add_special_tokens=False)[0]
+    text_encoder = pipe.text_encoder
+    token_embeds = text_encoder.get_input_embeddings().weight.data
+    token_embeds[placeholder_token_id] = loaded_embeds
 
     generator = torch.Generator(device=config.device)  # Seed generator to create the initial latent noise
     generator.manual_seed(config.seed)
 
-    for i,descriptive_token in enumerate(["some", config.placeholder_token]):
+    for i,descriptive_token in enumerate(["", config.placeholder_token]):
         generator.manual_seed(config.seed)
-        prompt = f"A photo of {descriptive_token} {int(config.amount)} {config.clazz}"
+        prompt = f"A photo of {descriptive_token} {int(config.amount)} {config.clazz}".replace("  "," ")
         print(f"Evaluation with {config.diffusion_steps} steps for the prompt:\n {prompt}")
 
         with torch.no_grad():
@@ -382,9 +382,8 @@ def evaluate(config: RunConfig):
                              generator=generator,
                              guidance_scale=0.0
                              ).images[0]
-            # image = utils.transform_img_tensor(image_out, config)
 
-        img_dir_path = f"img/{config.experiment_name}-eval/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
+        img_dir_path = f"img/{config.experiment_name}-eval-{config.diffusion_steps}/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
         Path(img_dir_path).mkdir(parents=True, exist_ok=True)
 
         utils.numpy_to_pil(
@@ -405,7 +404,7 @@ def yolo_evaluate_experiment(model, image_processor, image_path, clazz):
     target_sizes = torch.tensor([image.size[::-1]])
     results = image_processor.post_process_object_detection(outputs, threshold=0.3, target_sizes=target_sizes)[0]
     for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
-        if model.config.id2label[label.item()] == clazz[:-1]:
+        if model.config.id2label[label.item()] == clazz:
             count += 1
 
     return count
@@ -496,45 +495,49 @@ def evaluate_experiments(config: RunConfig):
         if str(config.lr) not in subfolder:
             continue
 
-        is_yolo, detected_actual_amount2, detected_optimized_amount2 = False, -1, -1
-        clazz, amount, seed, lr, v = subfolder.split('_')
-        subfolder_path = os.path.join("img", folder, subfolder, "train")
-        is_clipcount = clazz in fsc147_classes
+        try:
+            is_yolo, detected_actual_amount2, detected_optimized_amount2 = False, -1, -1
+            clazz, amount, seed, lr, v = subfolder.split('_')
+            subfolder_path = os.path.join("img", folder, subfolder, "train")
+            is_clipcount = clazz in fsc147_classes
 
-        print(f"evaluating {clazz=} {amount=}")
+            print(f"evaluating {clazz=} {amount=}")
 
-        clazz = clazz[:-1]
+            clazz = clazz[:-1]
 
-        path_actual = subfolder_path + "/actual.jpg" # for controlnet use something else
-        path_optimized = subfolder_path + "/optimized.jpg"
+            path_actual = subfolder_path + "/actual.jpg" # for controlnet use something else
+            path_optimized = subfolder_path + "/optimized.jpg"
 
-        detected_actual_amount = clipcount_evaluate_experiment(clipcount, path_actual, clazz)
-        detected_optimized_amount = clipcount_evaluate_experiment(clipcount, path_optimized, clazz)
+            detected_actual_amount = clipcount_evaluate_experiment(clipcount, path_actual, clazz)
+            detected_optimized_amount = clipcount_evaluate_experiment(clipcount, path_optimized, clazz)
 
-        detected_actual_amount_dino = dino_evaluate_experiment(dino, path_actual, clazz)
-        detected_optimized_amount_dino = dino_evaluate_experiment(dino, path_optimized, clazz)
+            detected_actual_amount_dino = dino_evaluate_experiment(dino, path_actual, clazz)
+            detected_optimized_amount_dino = dino_evaluate_experiment(dino, path_optimized, clazz)
 
-        if clazz in yolo.config.id2label.values():
-            is_yolo = True
-            detected_actual_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_actual, clazz)
-            detected_optimized_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_optimized, clazz)
+            if clazz in yolo.config.id2label.values():
+                is_yolo = True
+                detected_actual_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_actual, clazz)
+                detected_optimized_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_optimized, clazz)
 
-        actual_relevance_score = clip_score(clip, clip_processor, path_actual, amount, clazz)
-        optimized_relevance_score = clip_score(clip, clip_processor, path_optimized, amount, clazz)
-        # actual_relevance_score = siglip_score(siglip_pipeline, path_actual, amount, clazz)
-        # optimized_relevance_score = siglip_score(siglip_pipeline, path_optimized, amount, clazz)
+            actual_relevance_score = clip_score(clip, clip_processor, path_actual, amount, clazz)
+            optimized_relevance_score = clip_score(clip, clip_processor, path_optimized, amount, clazz)
+            # actual_relevance_score = siglip_score(siglip_pipeline, path_actual, amount, clazz)
+            # optimized_relevance_score = siglip_score(siglip_pipeline, path_optimized, amount, clazz)
 
-        new_row = {
-            'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount,
-            'is_clipcount' : is_clipcount, 'is_yolo' : is_yolo, 'sd_count2': detected_actual_amount2, 'sd_optimized_count2': detected_optimized_amount2,
-            'actual_relevance_score': actual_relevance_score, 'optimized_relevance_score' :optimized_relevance_score,
-            'sd_count3': detected_actual_amount_dino, 'sd_optimized_count3': detected_optimized_amount_dino
-        }
+            new_row = {
+                'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount,
+                'is_clipcount' : is_clipcount, 'is_yolo' : is_yolo, 'sd_count2': detected_actual_amount2, 'sd_optimized_count2': detected_optimized_amount2,
+                'actual_relevance_score': actual_relevance_score, 'optimized_relevance_score' :optimized_relevance_score,
+                'sd_count3': detected_actual_amount_dino, 'sd_optimized_count3': detected_optimized_amount_dino
+            }
 
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+
+        except Exception as e:
+            print(f"evaluation failed on {e}")
 
     dir_name = "experiments"
-    experiment_path = f"{dir_name}/experiment_{version}.pkl"
+    experiment_path = f"{dir_name}/experiment_{config.experiment_name}.pkl"
 
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
@@ -549,6 +552,7 @@ def evaluate_experiments(config: RunConfig):
     df.to_pickle(experiment_path)
 
     print("\n*** Results ***\n")
+    print(f"number of classes: {df.shape[0]}")
 
     df=df[df['is_clipcount']==True]
 
@@ -576,18 +580,13 @@ def evaluate_experiments(config: RunConfig):
 #         train(config)
 
 def run_controlnet(pipe, config):
-    prompt = f"a realistic high resolution image of {config.amount} {config.clazz}"
+    prompt = f"A photo of {config.amount} {config.clazz}"
     negative_prompt = "low quality, bad quality, sketches"
 
     print(f"Running ControlNet with prompt: {prompt}")
 
-    # download an image
-    image = load_image(
-        f"controlnet/{config.amount}_dots.png"
-    )
-
     # get canny image
-    image = np.array(image)
+    image = np.asarray(PIL.Image.open(f"controlnet/{config.amount}_dots.png"))
     image = cv2.Canny(image, 100, 200)
     image = image[:, :, None]
     image = np.concatenate([image, image, image], axis=2)
@@ -642,7 +641,8 @@ def run_experiments(config: RunConfig):
         pipe.enable_model_cpu_offload()
 
     start = time.time()
-    for clazz in classes:
+    for i, clazz in enumerate(classes):
+        print(f"*** Running class number {i} out of {len(classes)}")
         for amount in amounts:
             for seed in seeds:
                 print(f"*** Running experiment {clazz=},{amount=},{seed=}")
@@ -650,10 +650,13 @@ def run_experiments(config: RunConfig):
                 config.scale = scale
                 config.amount = amount
                 config.seed = seed
-                if config.is_controlnet:
-                    run_controlnet(pipe, config)
-                else:
-                    train(config)
+                try:
+                    if config.is_controlnet:
+                        run_controlnet(pipe, config)
+                    else:
+                        train(config)
+                except Exception as e:
+                    print(f"train failed on {e}")
 
     print(f"Overall experiment time: {(time.time() - start) / 3600} hours")
 

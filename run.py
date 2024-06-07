@@ -75,14 +75,14 @@ def train(config: RunConfig):
     class_infer = int(class_name.split()[0])
     prompt_suffix = " ".join(class_name.lower().split("_"))
 
-    ## Add the placeholder token in tokenizer
-    num_added_tokens = tokenizer.add_tokens(config.placeholder_token)
-    if num_added_tokens == 0:
-        raise ValueError(
-            f"The tokenizer already contains the token {config.placeholder_token}. Please pass a different"
-            " `placeholder_token` that is not already in the tokenizer."
-        )
-
+    # ## Add the placeholder token in tokenizer
+    # num_added_tokens = tokenizer.add_tokens(config.placeholder_token)
+    # if num_added_tokens == 0:
+    #     raise ValueError(
+    #         f"The tokenizer already contains the token {config.placeholder_token}. Please pass a different"
+    #         " `placeholder_token` that is not already in the tokenizer."
+    #     )
+    #
     # ## Get token ids for our placeholder and initializer token.
     # # This code block will complain if initializer string is not a single token
     # ## Convert the initializer_token, placeholder_token to ids
@@ -100,7 +100,6 @@ def train(config: RunConfig):
     # #  Initialise the newly added placeholder token
     # token_embeds = text_encoder.get_input_embeddings().weight.data
     # token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
-
     placeholder_token_id = tokenizer.encode(config.placeholder_token, add_special_tokens=False)[0]
 
     # Define dataloades
@@ -402,7 +401,7 @@ def yolo_evaluate_experiment(model, image_processor, image_path, clazz):
 
     # print results
     target_sizes = torch.tensor([image.size[::-1]])
-    results = image_processor.post_process_object_detection(outputs, threshold=0.3, target_sizes=target_sizes)[0]
+    results = image_processor.post_process_object_detection(outputs, threshold=0.4, target_sizes=target_sizes)[0]
     for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
         if model.config.id2label[label.item()] == clazz:
             count += 1
@@ -505,7 +504,7 @@ def evaluate_experiments(config: RunConfig):
 
             clazz = clazz[:-1]
 
-            path_actual = subfolder_path + "/actual.jpg" # for controlnet use something else
+            path_actual = os.path.join("img", "25lambda", subfolder, "train") + "/actual.jpg" # for controlnet use something else
             path_optimized = subfolder_path + "/optimized.jpg"
 
             detected_actual_amount = clipcount_evaluate_experiment(clipcount, path_actual, clazz)

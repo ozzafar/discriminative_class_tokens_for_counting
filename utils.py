@@ -1,14 +1,12 @@
 from PIL import Image
 
 from transformers import CLIPTextModel, CLIPTokenizer
-import torchvision.transforms as T
 import torch
 
 import kornia
 
 from diffusers.models import UNet2DConditionModel, AutoencoderKL
 from diffusers.pipelines import AutoPipelineForText2Image
-from insta_flow.code.pipeline_rf import RectifiedFlowPipeline
 
 # From timm.data.constants
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)

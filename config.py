@@ -7,10 +7,15 @@ class RunConfig:
     # Exp setup
     train: bool
     evaluate: bool
-    experiment: bool
-    evaluate_experiment: bool
-    experiment_name: str
-    evaluate_tokens: bool
+    experiment: bool = False
+    evaluate_experiment: bool = False
+    experiment_name: str = False
+    evaluate_tokens: bool = False
+
+    amount: float = 7
+    clazz:  str = "oranges"
+    _lambda: float = 10
+    scale: float = 70
 
     is_v2: bool = False
     is_controlnet: bool = False
@@ -20,11 +25,6 @@ class RunConfig:
 
     # the classifier (Options: inet (ImageNet), inat (iNaturalist), cub (CUB200))
     classifier: str = "clip-count"
-
-    _lambda: float = 10
-    scale: float = 70
-    amount: float = 7
-    clazz:  str = "oranges"
 
     diffusion_steps:  int = 1
 

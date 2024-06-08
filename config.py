@@ -23,8 +23,8 @@ class RunConfig:
     # Id of the experiment
     exp_id: str = "demo"
 
-    # the classifier (Options: inet (ImageNet), inat (iNaturalist), cub (CUB200))
-    classifier: str = "clip-count"
+    # the counting model (Options: clip-count, clip)
+    counting_model_name: str = "clip-count"
 
     diffusion_steps:  int = 1
 

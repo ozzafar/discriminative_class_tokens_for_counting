@@ -1,10 +1,11 @@
 from PIL import Image
 
-from transformers import CLIPTextModel, CLIPTokenizer
+from transformers import CLIPTextModel, CLIPTokenizer, CLIPProcessor, CLIPModel
 import torch
 
 import kornia
 
+from config import RunConfig
 from diffusers.models import UNet2DConditionModel, AutoencoderKL
 from diffusers.pipelines import AutoPipelineForText2Image
 
@@ -33,53 +34,28 @@ def transform_img_tensor(image, config):
     """
     Transforms an image based on the specified classifier input configurations.
     """
-    if config.classifier == "inet":
-        image = kornia.geometry.transform.resize(image, 256, interpolation="bicubic")
-        image = kornia.geometry.transform.center_crop(image, (224, 224))
-        # image = T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])(image)
-    else:
-        # image = kornia.geometry.transform.resize(image, 224, interpolation="bicubic")
-        image = kornia.geometry.transform.resize(image, 224)
-        image = kornia.geometry.transform.center_crop(image, (224, 224))
-        # image = T.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)(image)
+    # image = kornia.geometry.transform.resize(image, 224, interpolation="bicubic")
+    image = kornia.geometry.transform.resize(image, 224)
+    image = kornia.geometry.transform.center_crop(image, (224, 224))
+    # image = T.Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)(image)
     return image
 
 
-def prepare_classifier(config):
-    if config.classifier == "inet":
-        from transformers import ViTForImageClassification
+def prepare_counting_model(config: RunConfig):
+    match config.counting_model_name:
+        case "clip":
+            from transformers import CLIPModel
+            return CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
+        case"clip-count":
+            from clip_count.run import Model
+            return Model.load_from_checkpoint("clip_count/clipcount_pretrained.ckpt", strict=False).cuda()
+def prepare_clip(config: RunConfig):
+    # TODO move clip version to config
+    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+    clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
+    return clip, processor
 
-        model = ViTForImageClassification.from_pretrained(
-            "google/vit-large-patch16-224"
-        ).cuda()
-    elif config.classifier == "cub":
-        from vitmae import CustomViTForImageClassification
-
-        model = CustomViTForImageClassification.from_pretrained(
-            "vesteinn/vit-mae-cub"
-        ).cuda()
-    elif config.classifier == "inat":
-        from vitmae import CustomViTForImageClassification
-
-        model = CustomViTForImageClassification.from_pretrained(
-            "vesteinn/vit-mae-inat21"
-        ).cuda()
-    elif config.classifier == "clip":
-        from transformers import CLIPModel
-
-        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32"
-        ).cuda()
-    elif config.classifier == "clip-count":
-        from clip_count.run import Model
-
-        model = Model.load_from_checkpoint(
-            "clipcount_pretrained.ckpt"
-        ,strict=False).cuda()
-
-    return model
-
-
-def prepare_stable(config):
+def prepare_stable(config: RunConfig):
     # Generative model
     pretrained_model_name_or_path = "stabilityai/sdxl-turbo"
 

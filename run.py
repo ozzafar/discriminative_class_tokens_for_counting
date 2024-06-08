@@ -21,15 +21,14 @@ from clip_count.run import Model
 from clip_count.util import misc
 from diffusers import AutoPipelineForText2Image, StableDiffusionXLControlNetPipeline, ControlNetModel
 from torch import device
-from transformers import YolosForObjectDetection, YolosImageProcessor, AutoModel, AutoProcessor, pipeline, \
-    CLIPProcessor, CLIPModel, CLIPTextModel
+from transformers import YolosForObjectDetection, YolosImageProcessor, pipeline, \
+    CLIPProcessor, CLIPModel
 
 from datasets import prompt_dataset
 import utils
 import numpy as np
-import cv2
 import torchvision.transforms.functional as TF
-from groundingdino.util.inference import load_model, load_image, predict, annotate
+from groundingdino.util.inference import load_model, load_image, predict
 import cv2
 
 from config import RunConfig
@@ -41,10 +40,8 @@ def train(config: RunConfig):
     os.environ['TORCH_USE_CUDA_DSA'] = "1"
     torch.autograd.set_detect_anomaly(True)
 
-    classification_model = utils.prepare_classifier(config)
-    # TODO move to prepare_clip
-    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-    clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
+    counting_model = utils.prepare_counting_model(config)
+    clip, processor = utils.prepare_clip(config)
 
     train_start = time.time()
 
@@ -181,7 +178,7 @@ def train(config: RunConfig):
     vae.to(accelerator.device, dtype=weight_dtype)
     unet.to(accelerator.device, dtype=weight_dtype)
 
-    classification_model = classification_model.to(accelerator.device)
+    counting_model = counting_model.to(accelerator.device)
     text_encoder = text_encoder.to(accelerator.device)
 
     # Keep vae in eval mode as we don't train it
@@ -231,7 +228,7 @@ def train(config: RunConfig):
                 prompt = [class_name.split()[-1]]
 
                 with torch.cuda.amp.autocast():
-                    orig_output = classification_model.forward(image, prompt)
+                    orig_output = counting_model.forward(image, prompt)
 
                 output = torch.sum(orig_output[0] / config.scale)
 
@@ -470,7 +467,7 @@ def clipcount_evaluate_experiment(model, image_path, clazz):
 def evaluate_experiments(config: RunConfig):
     yolo = YolosForObjectDetection.from_pretrained('hustvl/yolos-tiny')
     yolo_image_processor = YolosImageProcessor.from_pretrained("hustvl/yolos-tiny")
-    clipcount = Model.load_from_checkpoint("clipcount_pretrained.ckpt", strict=False).cuda()
+    clipcount = Model.load_from_checkpoint("clip_count/clipcount_pretrained.ckpt", strict=False).cuda()
     clipcount.eval()
     siglip_pipeline = pipeline(task="zero-shot-image-classification", model="google/siglip-base-patch16-256-i18n")
     clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
@@ -504,7 +501,7 @@ def evaluate_experiments(config: RunConfig):
 
             clazz = clazz[:-1]
 
-            path_actual = os.path.join("img", "25lambda", subfolder, "train") + "/actual.jpg" # for controlnet use something else
+            path_actual = subfolder_path + "/actual.jpg" # for ControlNet use: os.path.join("img", "25lambda", subfolder, "train") + "/actual.jpg"
             path_optimized = subfolder_path + "/optimized.jpg"
 
             detected_actual_amount = clipcount_evaluate_experiment(clipcount, path_actual, clazz)

@@ -4,6 +4,7 @@ my_concept/
 pipeline_token/
 sd-concept-output/
 token/
-/clipcount_pretrained.ckpt
+/clip_count/clipcount_pretrained.ckpt
 /discrimnative_tokens_for_ocr.ipynb
 /experiments/
+/yolov8n.pt

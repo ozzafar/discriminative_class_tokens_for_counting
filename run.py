@@ -42,6 +42,9 @@ def train(config: RunConfig):
 
     counting_model = utils.prepare_counting_model(config)
     clip, processor = utils.prepare_clip(config)
+    if config.is_dynamic_scale_factor:
+        yolo = YolosForObjectDetection.from_pretrained('hustvl/yolos-tiny')
+        yolo_image_processor = YolosImageProcessor.from_pretrained("hustvl/yolos-tiny")
 
     train_start = time.time()
 
@@ -230,7 +233,8 @@ def train(config: RunConfig):
                 with torch.cuda.amp.autocast():
                     orig_output = counting_model.forward(image, prompt)
 
-                output = torch.sum(orig_output[0] / config.scale)
+                scale_factor = extract_clip_count_scale_factor(image_out.detach(), orig_output[0].detach(), yolo, yolo_image_processor) if config.is_dynamic_scale_factor else config.scale
+                output = torch.sum(orig_output[0] / scale_factor)
 
                 if classification_loss is None:
                     classification_loss = criterion(
@@ -389,21 +393,41 @@ def evaluate(config: RunConfig):
             "JPEG",
         )
 
-def yolo_evaluate_experiment(model, image_processor, image_path, clazz):
+def load_image(img):
+    if isinstance(img, str) and os.path.isfile(img):
+        # img is a file path, open with PIL.Image.open()
+        return Image.open(img)
+    elif isinstance(img, torch.Tensor):
+        # img is a tensor, convert to PIL image
+        transform_to_pil = transforms.ToPILImage()
+        return transform_to_pil(img.squeeze())
+    else:
+        raise ValueError("The provided input is neither a valid file path nor a tensor.")
+
+
+def run_yolo(model, image_processor, image, clazz, threshold=0.4):
     count = 0
-    image = Image.open(image_path)
+    # image = Image.open(image)
+    image = load_image(image)
 
     inputs = image_processor(images=image, return_tensors="pt")
     outputs = model(**inputs)
 
     # print results
     target_sizes = torch.tensor([image.size[::-1]])
-    results = image_processor.post_process_object_detection(outputs, threshold=0.4, target_sizes=target_sizes)[0]
+    results = image_processor.post_process_object_detection(outputs, threshold, target_sizes=target_sizes)[0]
     for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
         if model.config.id2label[label.item()] == clazz:
             count += 1
 
     return count
+
+def extract_clip_count_scale_factor(image, density_map, yolo, yolo_image_processor):
+    with torch.no_grad():
+        num_of_objects = run_yolo(yolo, yolo_image_processor, image, config.clazz[:-1], threshold=0.7)
+        predicted_scale_factor = torch.sum(density_map / num_of_objects).item()
+        print(f"YOLO found: {num_of_objects} objects, predicted scale factor is: {predicted_scale_factor}")
+        return predicted_scale_factor
 
 def dino_evaluate_experiment(model, image_path, clazz):
     BOX_TRESHOLD = 0.1
@@ -512,8 +536,8 @@ def evaluate_experiments(config: RunConfig):
 
             if clazz in yolo.config.id2label.values():
                 is_yolo = True
-                detected_actual_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_actual, clazz)
-                detected_optimized_amount2 = yolo_evaluate_experiment(yolo, yolo_image_processor, path_optimized, clazz)
+                detected_actual_amount2 = run_yolo(yolo, yolo_image_processor, path_actual, clazz)
+                detected_optimized_amount2 = run_yolo(yolo, yolo_image_processor, path_optimized, clazz)
 
             actual_relevance_score = clip_score(clip, clip_processor, path_actual, amount, clazz)
             optimized_relevance_score = clip_score(clip, clip_processor, path_optimized, amount, clazz)
@@ -567,13 +591,6 @@ def evaluate_experiments(config: RunConfig):
     print(f"\nSD Relevance Score: {df[df['is_clipcount']==True]['actual_relevance_score'].mean()}, Ours Relevance Score: {df[df['is_clipcount']==True]['optimized_relevance_score'].mean()}")
     print(f"\nRelevance Score: {df[df['is_clipcount']==True].groupby('amount').agg({'actual_relevance_score':'mean','optimized_relevance_score':'mean'})}")
 
-# def run_experiments(config: RunConfig):
-#     experiments = [(3,"birds"),(5,"bowls"),(5,"chairs"),(5,"cups"),(10,"oranges"),(12,"cars"),(25,"grapes"),(25,"macroons"),(25,"pigeons"),(25,"see shells")]
-#     for experiment in experiments:
-#         amount, clazz = experiment[0],experiment[1]
-#         config.amount=amount
-#         config.clazz=clazz
-#         train(config)
 
 def run_controlnet(pipe, config):
     prompt = f"A photo of {config.amount} {config.clazz}"
@@ -601,7 +618,7 @@ def run_controlnet(pipe, config):
     image.save(f"{dir_name}/optimized.jpg")
 
 def evaluate_tokens(config: RunConfig):
-    classes = fsc147_classes
+    classes = fsc147_classes if not config.is_dynamic_scale_factor else list(set(fsc147_classes) & set(yolo_classes+[clz+"s" for clz in yolo_classes]))
     amounts = [5, 15, 25]
 
     start = time.time()

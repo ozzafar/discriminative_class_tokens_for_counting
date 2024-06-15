@@ -17,6 +17,7 @@ class RunConfig:
     _lambda: float = 10
     scale: float = 70
 
+    is_dynamic_scale_factor: bool = False
     is_v2: bool = False
     is_controlnet: bool = False
 
@@ -43,7 +44,7 @@ class RunConfig:
     skip_exists: bool = False
 
     # Train and Optimization
-    lr: float = 0.05
+    lr: float = 0.01
     betas: tuple = field(default_factory=lambda: (0.9, 0.999))
     weight_decay: float = 1e-2
     eps: float = 1e-08

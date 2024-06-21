@@ -233,7 +233,7 @@ def train(config: RunConfig):
                 with torch.cuda.amp.autocast():
                     orig_output = counting_model.forward(image, prompt)
 
-                scale_factor = extract_clip_count_scale_factor(image_out.detach(), orig_output[0].detach(), yolo, yolo_image_processor) if config.is_dynamic_scale_factor else config.scale
+                scale_factor = extract_clip_count_scale_factor(image_out.detach(), orig_output[0].detach(), yolo, yolo_image_processor, config.yolo_threshold) if config.is_dynamic_scale_factor else config.scale
                 output = torch.sum(orig_output[0] / scale_factor)
 
                 if classification_loss is None:
@@ -422,9 +422,9 @@ def run_yolo(model, image_processor, image, clazz, threshold=0.4):
 
     return count
 
-def extract_clip_count_scale_factor(image, density_map, yolo, yolo_image_processor):
+def extract_clip_count_scale_factor(image, density_map, yolo, yolo_image_processor, threshold):
     with torch.no_grad():
-        num_of_objects = run_yolo(yolo, yolo_image_processor, image, config.clazz[:-1], threshold=0.7)
+        num_of_objects = run_yolo(yolo, yolo_image_processor, image, config.clazz[:-1], threshold)
         predicted_scale_factor = torch.sum(density_map / num_of_objects).item()
         print(f"YOLO found: {num_of_objects} objects, predicted scale factor is: {predicted_scale_factor}")
         return predicted_scale_factor
@@ -635,7 +635,7 @@ def evaluate_tokens(config: RunConfig):
     print(f"Overall experiment time: {(time.time() - start) / 3600} hours")
 
 def run_experiments(config: RunConfig):
-    classes = fsc147_classes
+    classes = fsc147_classes if not config.is_dynamic_scale_factor else list(set(fsc147_classes) & set(yolo_classes + [clz + "s" for clz in yolo_classes]))
     amounts = [5, 15, 25]
     seeds = [35]
     scale = 60

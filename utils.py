@@ -46,14 +46,17 @@ def prepare_counting_model(config: RunConfig):
         case "clip":
             from transformers import CLIPModel
             return CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
-        case"clip-count":
+        case "clip-count":
             from clip_count.run import Model
             return Model.load_from_checkpoint("clip_count/clipcount_pretrained.ckpt", strict=False).cuda()
+
+
 def prepare_clip(config: RunConfig):
     # TODO move clip version to config
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
     clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
     return clip, processor
+
 
 def prepare_stable(config: RunConfig):
     # Generative model
@@ -67,7 +70,7 @@ def prepare_stable(config: RunConfig):
     )
     vae = AutoencoderKL.from_pretrained(pretrained_model_name_or_path, subfolder="vae")
     pipe = AutoPipelineForText2Image.from_pretrained(pretrained_model_name_or_path).to(
-            "cuda"
+        "cuda"
     )
     scheduler = pipe.scheduler
     del pipe
@@ -86,3 +89,42 @@ def save_progress(text_encoder, placeholder_token_id, accelerator, config, save_
     )
     learned_embeds_dict = {config.placeholder_token: learned_embeds.detach().cpu()}
     torch.save(learned_embeds_dict, save_path)
+
+
+def group_experiment_by_amount(df):
+    df = df[df['is_clipcount'] == True]
+
+    # SD (clipcount) MAE
+    sd_clipcount_mae = df.groupby('amount').agg({'sd_count_diff': 'mean'}).reset_index()
+    sd_clipcount_mae.rename(columns={'sd_count_diff': 'SD MAE (clipcount)'}, inplace=True)
+
+    # Ours (clipcount) MAE
+    ours_clipcount_mae = df.groupby('amount').agg({'sd_optimized_count_diff': 'mean'}).reset_index()
+    ours_clipcount_mae.rename(columns={'sd_optimized_count_diff': 'Ours MAE (clipcount)'}, inplace=True)
+
+    # SD (yolo) MAE
+    sd_yolo_mae = df[df['is_yolo'] == True].groupby('amount').agg(
+        {'sd_count_diff2': 'mean'}).reset_index()
+    sd_yolo_mae.rename(columns={'sd_count_diff2': 'SD MAE (YOLO)'}, inplace=True)
+
+    # Ours (yolo) MAE
+    ours_yolo_mae = df[df['is_yolo'] == True].groupby('amount').agg(
+        {'sd_optimized_count_diff2': 'mean'}).reset_index()
+    ours_yolo_mae.rename(columns={'sd_optimized_count_diff2': 'Ours MAE (YOLO)'}, inplace=True)
+
+    # SD (CLIP)
+    sd_clip = (1 - df.groupby('amount').agg({'actual_relevance_score': 'mean'})).reset_index()
+    sd_clip.rename(columns={'actual_relevance_score': 'SD CLIP'}, inplace=True)
+
+    # Ours (CLIP)
+    ours_clip = (1 - df.groupby('amount').agg({'optimized_relevance_score': 'mean'})).reset_index()
+    ours_clip.rename(columns={'optimized_relevance_score': 'Ours CLIP'}, inplace=True)
+
+    # Merge all dataframes
+    merged_df = sd_clipcount_mae.merge(ours_clipcount_mae, on='amount', how='outer')
+    merged_df = merged_df.merge(sd_yolo_mae, on='amount', how='outer')
+    merged_df = merged_df.merge(ours_yolo_mae, on='amount', how='outer')
+    merged_df = merged_df.merge(sd_clip, on='amount', how='outer')
+    merged_df = merged_df.merge(ours_clip, on='amount', how='outer')
+
+    return merged_df

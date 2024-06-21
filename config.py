@@ -18,6 +18,7 @@ class RunConfig:
     scale: float = 70
 
     is_dynamic_scale_factor: bool = False
+    yolo_threshold: float = 0.5
     is_v2: bool = False
     is_controlnet: bool = False
 

@@ -42,13 +42,16 @@ def transform_img_tensor(image, config):
 
 
 def prepare_counting_model(config: RunConfig):
+    model = None
     match config.counting_model_name:
         case "clip":
             from transformers import CLIPModel
-            return CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
+            model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
         case "clip-count":
             from clip_count.run import Model
-            return Model.load_from_checkpoint("clip_count/clipcount_pretrained.ckpt", strict=False).cuda()
+            model =  Model.load_from_checkpoint("clip_count/clipcount_pretrained.ckpt", strict=False).cuda()
+    model.eval()
+    return model
 
 
 def prepare_clip(config: RunConfig):

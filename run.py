@@ -619,11 +619,11 @@ def run_controlnet(pipe, config):
 
 def evaluate_tokens(config: RunConfig):
     classes = fsc147_classes if not config.is_dynamic_scale_factor else list(set(fsc147_classes) & set(yolo_classes+[clz+"s" for clz in yolo_classes]))
-    amounts = [5, 15, 25]
+    max_amount = 25
 
     start = time.time()
     for clazz in classes:
-        for amount in amounts:
+        for amount in range(max_amount+1):
             print(f"*** Running experiment {clazz=},{amount=}")
             config.clazz = (clazz+"s") if clazz in yolo_classes else clazz
             config.amount = amount
@@ -636,7 +636,7 @@ def evaluate_tokens(config: RunConfig):
 
 def run_experiments(config: RunConfig):
     classes = fsc147_classes if not config.is_dynamic_scale_factor else list(set(fsc147_classes) & set(yolo_classes + [clz + "s" for clz in yolo_classes]))
-    amounts = [5, 15, 25]
+    max_amount = 25
     seeds = [35]
     scale = 60
 
@@ -656,7 +656,7 @@ def run_experiments(config: RunConfig):
     start = time.time()
     for i, clazz in enumerate(classes):
         print(f"*** Running class number {i} out of {len(classes)}")
-        for amount in amounts:
+        for amount in range(max_amount+1):
             for seed in seeds:
                 print(f"*** Running experiment {clazz=},{amount=},{seed=}")
                 config.clazz = (clazz+"s") if clazz in yolo_classes else clazz

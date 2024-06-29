@@ -1,3 +1,4 @@
+import math
 import time
 from math import sqrt
 
@@ -12,6 +13,7 @@ import itertools
 
 from PIL import Image
 from accelerate import Accelerator
+from matplotlib import pyplot as plt
 
 from datasets.classes_datasets import yolo_classes, fsc147_classes
 from diffusers.utils import load_image
@@ -349,6 +351,7 @@ def train(config: RunConfig):
 
     print(f"End training time: {(time.time() - train_start) / 60} minutes")
 
+
 def evaluate(config: RunConfig):
     print("Evaluation - print image with discriminatory tokens, then one without.")
     # Stable model
@@ -368,9 +371,9 @@ def evaluate(config: RunConfig):
     generator = torch.Generator(device=config.device)  # Seed generator to create the initial latent noise
     generator.manual_seed(config.seed)
 
-    for i,descriptive_token in enumerate(["", config.placeholder_token]):
+    for i, descriptive_token in enumerate(["", config.placeholder_token]):
         generator.manual_seed(config.seed)
-        prompt = f"A photo of {descriptive_token} {int(config.amount)} {config.clazz}".replace("  "," ")
+        prompt = f"A photo of {descriptive_token} {int(config.amount)} {config.clazz}".replace("  ", " ")
         print(f"Evaluation with {config.diffusion_steps} steps for the prompt:\n {prompt}")
 
         with torch.no_grad():
@@ -392,6 +395,7 @@ def evaluate(config: RunConfig):
             f"{img_dir_path}/{'actual' if i == 0 else 'optimized'}.jpg",
             "JPEG",
         )
+
 
 def load_image(img):
     if isinstance(img, str) and os.path.isfile(img):
@@ -422,12 +426,14 @@ def run_yolo(model, image_processor, image, clazz, threshold=0.4):
 
     return count
 
+
 def extract_clip_count_scale_factor(image, density_map, yolo, yolo_image_processor, threshold):
     with torch.no_grad():
         num_of_objects = run_yolo(yolo, yolo_image_processor, image, config.clazz[:-1], threshold)
         predicted_scale_factor = torch.sum(density_map / num_of_objects).item()
         print(f"YOLO found: {num_of_objects} objects, predicted scale factor is: {predicted_scale_factor}")
         return predicted_scale_factor
+
 
 def dino_evaluate_experiment(model, image_path, clazz):
     BOX_TRESHOLD = 0.1
@@ -444,6 +450,8 @@ def dino_evaluate_experiment(model, image_path, clazz):
     )
 
     return len(boxes)
+
+
 def siglip_score(siglip_pipeline, image_path, amount, clazz):
     image = Image.open(image_path)
 
@@ -452,14 +460,17 @@ def siglip_score(siglip_pipeline, image_path, amount, clazz):
 
     return score
 
+
 def clip_score(model, processor, image_path, amount, clazz):
     image = Image.open(image_path)
 
     inputs = processor(text=[f"a photo of {amount} {clazz}"], images = image, return_tensors="pt", padding=True).to("cuda")
     outputs = model(**inputs)
-    score = round(outputs[0][0].item()/100, 4)
+    score = round(outputs[0][0].item() / 100, 4)
 
     return score
+
+
 def clipcount_evaluate_experiment(model, image_path, clazz):
     image = Image.open(image_path)
     transform = transforms.Compose([
@@ -525,7 +536,7 @@ def evaluate_experiments(config: RunConfig):
 
             clazz = clazz[:-1]
 
-            path_actual = subfolder_path + "/actual.jpg" # for ControlNet use: os.path.join("img", "25lambda", subfolder, "train") + "/actual.jpg"
+            path_actual = subfolder_path + "/actual.jpg"  # for ControlNet use: os.path.join("img", "25lambda", subfolder, "train") + "/actual.jpg"
             path_optimized = subfolder_path + "/optimized.jpg"
 
             detected_actual_amount = clipcount_evaluate_experiment(clipcount, path_actual, clazz)
@@ -574,7 +585,7 @@ def evaluate_experiments(config: RunConfig):
     print("\n*** Results ***\n")
     print(f"number of classes: {df.shape[0]}")
 
-    df=df[df['is_clipcount']==True]
+    df = df[df['is_clipcount'] == True]
 
     print(f"\nSD MAE (clipcount): {df[df['is_clipcount']==True]['sd_count_diff'].mean()}, Ours MAE: {df[df['is_clipcount']==True]['sd_optimized_count_diff'].mean()}")
     print(f"\nSD RMSE (clipcount): {sqrt((df[df['is_clipcount']==True]['sd_count_diff'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_clipcount']==True]['sd_optimized_count_diff'] ** 2).mean())}")
@@ -612,10 +623,52 @@ def run_controlnet(pipe, config):
     ).images[0]
 
     image.show()
-    dir_name = f"img/controlnet_{config.diffusion_steps}/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
+    dir_name = f"img/{config.experiment_name}/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
     image.save(f"{dir_name}/optimized.jpg")
+
+
+def create_images_grid_helper(type: str, amount: float, experiment_name: str):
+    num_of_images = 25
+    df = pd.read_pickle(f"experiments/experiment_{experiment_name}.pkl")
+    df = df[df['amount'] == amount]
+    df['sd_optimized_count2'] = pd.to_numeric(df['sd_optimized_count2'])
+    df = df.nsmallest(num_of_images, 'sd_optimized_count2')
+
+    grid_size = math.ceil(math.sqrt(num_of_images))
+    fig, axes = plt.subplots(grid_size, grid_size, figsize=(15, 15))
+    axes = axes.flatten()
+
+    for i, (index, row) in enumerate(df.iterrows()):
+        if i >= num_of_images:
+            break
+        class_name = row['class']
+        img_path = f'img/{experiment_name}/{class_name}s_{amount}_35_0.01_v1/train/{type}.jpg'
+
+        if os.path.exists(img_path):
+            img = Image.open(img_path)
+            axes[i].imshow(img)
+            axes[i].set_title(class_name)
+            axes[i].axis('off')
+        else:
+            axes[i].text(0.5, 0.5, 'Image not found', horizontalalignment='center', verticalalignment='center')
+            axes[i].set_title(class_name)
+            axes[i].axis('off')
+
+    # Hide any unused subplots
+    for j in range(i + 1, grid_size * grid_size):
+        axes[j].axis('off')
+
+    plt.tight_layout()
+    # plt.show()
+    plt.savefig(f"grid_{amount}_{type}.png")
+
+
+def create_images_grid(config: RunConfig):
+    create_images_grid_helper("actual", config.amount, config.experiment_name)
+    create_images_grid_helper("optimized", config.amount, config.experiment_name)
+
 
 def evaluate_tokens(config: RunConfig):
     classes = fsc147_classes if not config.is_dynamic_scale_factor else list(set(fsc147_classes) & set(yolo_classes+[clz+"s" for clz in yolo_classes]))
@@ -623,9 +676,9 @@ def evaluate_tokens(config: RunConfig):
 
     start = time.time()
     for clazz in classes:
-        for amount in range(max_amount+1):
+        for amount in range(1, max_amount + 1):
             print(f"*** Running experiment {clazz=},{amount=}")
-            config.clazz = (clazz+"s") if clazz in yolo_classes else clazz
+            config.clazz = (clazz + "s") if clazz in yolo_classes else clazz
             config.amount = amount
             try:
                 evaluate(config)
@@ -634,8 +687,10 @@ def evaluate_tokens(config: RunConfig):
 
     print(f"Overall experiment time: {(time.time() - start) / 3600} hours")
 
+
 def run_experiments(config: RunConfig):
-    classes = fsc147_classes if not config.is_dynamic_scale_factor else list(set(fsc147_classes) & set(yolo_classes + [clz + "s" for clz in yolo_classes]))
+    classes = list(fsc147_classes) if not config.is_dynamic_scale_factor else list(set(fsc147_classes) & set(yolo_classes + [clz + "s" for clz in yolo_classes]))
+    classes = sorted(classes)
     max_amount = 25
     seeds = [35]
     scale = 60
@@ -656,10 +711,10 @@ def run_experiments(config: RunConfig):
     start = time.time()
     for i, clazz in enumerate(classes):
         print(f"*** Running class number {i} out of {len(classes)}")
-        for amount in range(max_amount+1):
+        for amount in range(1, max_amount + 1):
             for seed in seeds:
                 print(f"*** Running experiment {clazz=},{amount=},{seed=}")
-                config.clazz = (clazz+"s") if clazz in yolo_classes else clazz
+                config.clazz = (clazz + "s") if clazz in yolo_classes else clazz
                 config.scale = scale
                 config.amount = amount
                 config.seed = seed
@@ -672,6 +727,7 @@ def run_experiments(config: RunConfig):
                     print(f"train failed on {e}")
 
     print(f"Overall experiment time: {(time.time() - start) / 3600} hours")
+
 
 if __name__ == "__main__":
 
@@ -691,3 +747,5 @@ if __name__ == "__main__":
         evaluate_experiments(config)
     if config.evaluate_tokens:
         evaluate_tokens(config)
+    if config.create_images_grid:
+        create_images_grid(config)

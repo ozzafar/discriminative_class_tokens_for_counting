@@ -11,6 +11,7 @@ class RunConfig:
     evaluate_experiment: bool = False
     experiment_name: str = False
     evaluate_tokens: bool = False
+    create_images_grid: bool = False
 
     amount: float = 7
     clazz:  str = "oranges"

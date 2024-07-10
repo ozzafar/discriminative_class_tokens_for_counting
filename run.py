@@ -630,6 +630,9 @@ def run_controlnet(pipe, config):
 
 
 def create_images_grid_helper(type: str, amount: float, experiment_name: str):
+    yolo = YolosForObjectDetection.from_pretrained('hustvl/yolos-tiny')
+    yolo_image_processor = YolosImageProcessor.from_pretrained("hustvl/yolos-tiny")
+
     num_of_images = 25
     df = pd.read_pickle(f"experiments/experiment_{experiment_name}.pkl")
     df = df[df['amount'] == amount]
@@ -648,8 +651,9 @@ def create_images_grid_helper(type: str, amount: float, experiment_name: str):
 
         if os.path.exists(img_path):
             img = Image.open(img_path)
+            cnt = run_yolo(yolo, yolo_image_processor, img_path, class_name[:-1], threshold=0.6)
             axes[i].imshow(img)
-            axes[i].set_title(class_name)
+            axes[i].set_title(f'{class_name} (YOLO:{cnt})', fontsize=28)  # Increase title font size
             axes[i].axis('off')
         else:
             axes[i].text(0.5, 0.5, 'Image not found', horizontalalignment='center', verticalalignment='center')
@@ -660,9 +664,11 @@ def create_images_grid_helper(type: str, amount: float, experiment_name: str):
     for j in range(i + 1, grid_size * grid_size):
         axes[j].axis('off')
 
+    plt.subplots_adjust(hspace=-0.5)  # Adjust this value as needed
     plt.tight_layout()
     # plt.show()
-    plt.savefig(f"grid_{amount}_{type}.png")
+    print("saving fig")
+    plt.savefig(f"figures/grid_{int(amount)}_{type}.png")
 
 
 def create_images_grid(config: RunConfig):

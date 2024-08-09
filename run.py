@@ -1,4 +1,5 @@
 import math
+import random
 import time
 from math import sqrt
 
@@ -675,6 +676,19 @@ def create_images_grid(config: RunConfig):
     create_images_grid_helper("actual", config.amount, config.experiment_name)
     create_images_grid_helper("optimized", config.amount, config.experiment_name)
 
+def create_human_study(config: RunConfig):
+    folder = config.experiment_name
+    classes = list(set([s.split('_')[0] for s in os.listdir(f"img/{folder}")]))
+    target_path = "human_study"
+    Path(target_path).mkdir(parents=True, exist_ok=True)
+
+    for clazz in classes:
+        random_numbers = random.sample(range(1, 6), 3)
+        for number in random_numbers:
+            path = os.path.join("img", folder, f"{clazz}_{number}_{config.seed}_{config.lr}_v1", "train")
+            shutil.copy(path + "/actual.jpg", target_path + f"/{number}_{clazz}_actual.jpg")
+            shutil.copy(path + "/optimized.jpg", target_path + f"/{number}_{clazz}_optimized.jpg")
+
 
 def evaluate_tokens(config: RunConfig):
     classes = fsc147_classes if not config.is_dynamic_scale_factor else list(set(fsc147_classes) & set(yolo_classes+[clz+"s" for clz in yolo_classes]))
@@ -755,3 +769,5 @@ if __name__ == "__main__":
         evaluate_tokens(config)
     if config.create_images_grid:
         create_images_grid(config)
+    if config.create_human_study:
+        create_human_study(config)

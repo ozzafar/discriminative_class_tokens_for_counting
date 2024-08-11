@@ -11,13 +11,15 @@ class RunConfig:
     evaluate_experiment: bool = False
     experiment_name: str = False
     evaluate_tokens: bool = False
+    evaluate_token_reuse: bool = False
     create_images_grid: bool = False
     create_human_study: bool = False
 
     amount: float = 7
-    clazz:  str = "oranges"
+    clazz: str = "oranges"
     _lambda: float = 10
     scale: float = 70
+    token_clazz: str = None  # for token reuse evaluation
 
     is_dynamic_scale_factor: bool = False
     yolo_threshold: float = 0.5
@@ -30,7 +32,7 @@ class RunConfig:
     # the counting model (Options: clip-count, clip)
     counting_model_name: str = "clip-count"
 
-    diffusion_steps:  int = 1
+    diffusion_steps: int = 1
 
     # Affect training time
     early_stopping: int = 15

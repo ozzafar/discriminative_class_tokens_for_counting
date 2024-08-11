@@ -8,3 +8,4 @@ token/
 /notebooks/discrimnative_tokens_for_ocr.ipynb
 /experiments/
 /yolov8n.pt
+/results/

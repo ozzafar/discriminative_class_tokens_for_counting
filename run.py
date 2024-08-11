@@ -397,6 +397,50 @@ def evaluate(config: RunConfig):
             "JPEG",
         )
 
+def evaluate_reuse(config: RunConfig):
+    print("Evaluation - print image with discriminatory tokens, then one without.")
+    # Stable model
+    token_clazz = config.token_clazz if config.token_clazz else config.clazz
+    token_path = f"token/reuse-experiment/{config.amount} {token_clazz}/{config.epoch_size}_{config.lr}_35_{config.number_of_prompts}_{config.early_stopping}_v1_{config.amount} {token_clazz}"
+    loaded_embeds = torch.load(f'{token_path}/token_embeds.pt')
+
+    pipe = AutoPipelineForText2Image.from_pretrained(
+        pretrained_model_or_path="stabilityai/sdxl-turbo",
+        torch_dtype=torch.float32
+    ).to(device)
+
+    placeholder_token_id = pipe.tokenizer.encode(config.placeholder_token, add_special_tokens=False)[0]
+    text_encoder = pipe.text_encoder
+    token_embeds = text_encoder.get_input_embeddings().weight.data
+    token_embeds[placeholder_token_id] = loaded_embeds
+
+    generator = torch.Generator(device=config.device)  # Seed generator to create the initial latent noise
+    generator.manual_seed(config.seed)
+
+    for i, descriptive_token in enumerate(["", config.placeholder_token]):
+        generator.manual_seed(config.seed)
+        prompt = f"A photo of {descriptive_token} {int(config.amount)} {config.clazz}".replace("  ", " ")
+        print(f"Evaluation with {config.diffusion_steps} steps for the prompt:\n {prompt}")
+
+        with torch.no_grad():
+            image_out = pipe(prompt=prompt,
+                             num_inference_steps=config.diffusion_steps,
+                             output_type="pt",
+                             height=config.height,
+                             width=config.width,
+                             generator=generator,
+                             guidance_scale=0.0
+                             ).images[0]
+
+        img_dir_path = f"img/{config.experiment_name}-eval-{config.diffusion_steps}/{config.clazz}_{config.amount}_{config.seed}_{config.lr}_v1/train"
+        Path(img_dir_path).mkdir(parents=True, exist_ok=True)
+
+        utils.numpy_to_pil(
+            image_out.unsqueeze(0).permute(0, 2, 3, 1).cpu().detach().numpy()
+        )[0].save(
+            f"{img_dir_path}/{'actual' if i == 0 else 'optimized'}.jpg",
+            "JPEG",
+        )
 
 def load_image(img):
     if isinstance(img, str) and os.path.isfile(img):
@@ -543,9 +587,6 @@ def evaluate_experiments(config: RunConfig):
             detected_actual_amount = clipcount_evaluate_experiment(clipcount, path_actual, clazz)
             detected_optimized_amount = clipcount_evaluate_experiment(clipcount, path_optimized, clazz)
 
-            detected_actual_amount_dino = dino_evaluate_experiment(dino, path_actual, clazz)
-            detected_optimized_amount_dino = dino_evaluate_experiment(dino, path_optimized, clazz)
-
             if clazz in yolo.config.id2label.values():
                 is_yolo = True
                 detected_actual_amount2 = run_yolo(yolo, yolo_image_processor, path_actual, clazz)
@@ -559,8 +600,7 @@ def evaluate_experiments(config: RunConfig):
             new_row = {
                 'class': clazz, 'seed': seed, 'amount': int(amount), 'sd_count': detected_actual_amount, 'sd_optimized_count': detected_optimized_amount,
                 'is_clipcount' : is_clipcount, 'is_yolo' : is_yolo, 'sd_count2': detected_actual_amount2, 'sd_optimized_count2': detected_optimized_amount2,
-                'actual_relevance_score': actual_relevance_score, 'optimized_relevance_score' :optimized_relevance_score,
-                'sd_count3': detected_actual_amount_dino, 'sd_optimized_count3': detected_optimized_amount_dino
+                'actual_relevance_score': actual_relevance_score, 'optimized_relevance_score' :optimized_relevance_score
             }
 
             df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
@@ -578,8 +618,6 @@ def evaluate_experiments(config: RunConfig):
     df['sd_optimized_count_diff'] = abs(df['sd_optimized_count'] - df['amount'])
     df['sd_count_diff2'] = abs(df['sd_count2'] - df['amount'])
     df['sd_optimized_count_diff2'] = abs(df['sd_optimized_count2'] - df['amount'])
-    df['sd_count_diff3'] = abs(df['sd_count3'] - df['amount'])
-    df['sd_optimized_count_diff3'] = abs(df['sd_optimized_count3'] - df['amount'])
 
     df.to_pickle(experiment_path)
 
@@ -591,10 +629,6 @@ def evaluate_experiments(config: RunConfig):
     print(f"\nSD MAE (clipcount): {df[df['is_clipcount']==True]['sd_count_diff'].mean()}, Ours MAE: {df[df['is_clipcount']==True]['sd_optimized_count_diff'].mean()}")
     print(f"\nSD RMSE (clipcount): {sqrt((df[df['is_clipcount']==True]['sd_count_diff'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_clipcount']==True]['sd_optimized_count_diff'] ** 2).mean())}")
     print(f"\nMAE (clipcount): {df[df['is_clipcount']==True].groupby('amount').agg({'sd_count_diff': 'mean', 'sd_optimized_count_diff': 'mean'})}")
-
-    print(f"\nSD MAE (dino): {df[df['is_clipcount']==True]['sd_count_diff3'].mean()}, Ours MAE: {df[df['is_clipcount']==True]['sd_optimized_count_diff3'].mean()}")
-    print(f"\nSD RMSE (dino): {sqrt((df[df['is_clipcount']==True]['sd_count_diff3'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_clipcount']==True]['sd_optimized_count_diff3'] ** 2).mean())}")
-    print(f"\nMAE (dino): {df[df['is_clipcount']==True].groupby('amount').agg({'sd_count_diff3': 'mean', 'sd_optimized_count_diff3': 'mean'})}")
 
     print(f"\nSD MAE (yolo): {df[df['is_yolo']==True]['sd_count_diff2'].mean()}, Ours MAE: {df[df['is_yolo']==True]['sd_optimized_count_diff2'].mean()}")
     print(f"\nSD RMSE (yolo): {sqrt((df[df['is_yolo']==True]['sd_count_diff2'] ** 2).mean())}, Ours RMSE: {sqrt((df[df['is_yolo']==True]['sd_optimized_count_diff2'] ** 2).mean())}")
@@ -707,6 +741,52 @@ def evaluate_tokens(config: RunConfig):
 
     print(f"Overall experiment time: {(time.time() - start) / 3600} hours")
 
+def evaluate_token_reuse(config: RunConfig):
+    amount = 10
+    classes = ['apples','birds','sheeps']
+    families = [['tomatoes','oranges','strawberries'],['crows','pigeons','seagulls'],['zebras','horses','cows']]
+    seeds = [10, 20, 30]
+    experiment_name = "reuse-experiment"
+
+    # in-domain experiment
+    for i, clazz in enumerate(classes):
+        for target_clazz in families[i]:
+            print(f"*** Running experiment {clazz=},{amount=}")
+            config.clazz = target_clazz
+            config.token_clazz = clazz
+            config.amount = amount
+            config.experiment_name = experiment_name + "-indomain"
+            try:
+                evaluate_reuse(config)
+            except Exception as e:
+                print(f"train failed on {e}")
+
+    # out-domain experiment
+    for i, clazz in enumerate(classes):
+        for target_clazz in families[(i+1) % len(families)]:
+            print(f"*** Running experiment {clazz=},{amount=}")
+            config.clazz = target_clazz
+            config.token_clazz = clazz
+            config.amount = amount
+            config.experiment_name = experiment_name + "-outdomain"
+            try:
+                evaluate_reuse(config)
+            except Exception as e:
+                print(f"train failed on {e}")
+
+    # in-class experiment
+    for i, clazz in enumerate(classes):
+        for seed in seeds:
+            print(f"*** Running experiment {clazz=},{amount=}")
+            config.clazz = clazz
+            config.seed = seed
+            config.amount = amount
+            config.experiment_name = experiment_name + "-inclass"
+            try:
+                evaluate_reuse(config)
+            except Exception as e:
+                print(f"train failed on {e}")
+
 
 def run_experiments(config: RunConfig):
     classes = list(fsc147_classes) if not config.is_dynamic_scale_factor else list(set(fsc147_classes) & set(yolo_classes + [clz + "s" for clz in yolo_classes]))
@@ -767,6 +847,8 @@ if __name__ == "__main__":
         evaluate_experiments(config)
     if config.evaluate_tokens:
         evaluate_tokens(config)
+    if config.evaluate_token_reuse:
+        evaluate_token_reuse(config)
     if config.create_images_grid:
         create_images_grid(config)
     if config.create_human_study:

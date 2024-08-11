@@ -31,7 +31,6 @@ from datasets import prompt_dataset
 import utils
 import numpy as np
 import torchvision.transforms.functional as TF
-from groundingdino.util.inference import load_model, load_image, predict
 import cv2
 
 from config import RunConfig
@@ -480,23 +479,6 @@ def extract_clip_count_scale_factor(image, density_map, yolo, yolo_image_process
         return predicted_scale_factor
 
 
-def dino_evaluate_experiment(model, image_path, clazz):
-    BOX_TRESHOLD = 0.1
-    TEXT_TRESHOLD = 0.1
-
-    image_source, image = load_image(image_path)
-
-    boxes, logits, phrases = predict(
-        model=model,
-        image=image,
-        caption=clazz,
-        box_threshold=BOX_TRESHOLD,
-        text_threshold=TEXT_TRESHOLD
-    )
-
-    return len(boxes)
-
-
 def siglip_score(siglip_pipeline, image_path, amount, clazz):
     image = Image.open(image_path)
 
@@ -552,8 +534,6 @@ def evaluate_experiments(config: RunConfig):
     siglip_pipeline = pipeline(task="zero-shot-image-classification", model="google/siglip-base-patch16-256-i18n")
     clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
     clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").cuda()
-    dino = load_model("GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
-                       "GroundingDINO/weights/groundingdino_swint_ogc.pth")
 
     df = pd.DataFrame(columns=['class', 'seed', 'amount', 'sd_count', 'sd_optimized_count', 'is_clipcount','is_yolo',
                                'sd_count2', 'sd_optimized_count2','actual_relevance_score','optimized_relevance_score',

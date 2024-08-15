@@ -116,11 +116,11 @@ def group_experiment_by_amount(df):
     ours_yolo_mae.rename(columns={'sd_optimized_count_diff2': 'Ours MAE (YOLO)'}, inplace=True)
 
     # SD (CLIP)
-    sd_clip = (1 - df.groupby('amount').agg({'actual_relevance_score': 'mean'})).reset_index()
+    sd_clip = (2.5 * df.groupby('amount').agg({'actual_relevance_score': 'mean'})).reset_index()
     sd_clip.rename(columns={'actual_relevance_score': 'SD CLIP'}, inplace=True)
 
     # Ours (CLIP)
-    ours_clip = (1 - df.groupby('amount').agg({'optimized_relevance_score': 'mean'})).reset_index()
+    ours_clip = (2.5 * df.groupby('amount').agg({'optimized_relevance_score': 'mean'})).reset_index()
     ours_clip.rename(columns={'optimized_relevance_score': 'Ours CLIP'}, inplace=True)
 
     # Merge all dataframes

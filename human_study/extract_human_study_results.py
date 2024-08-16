@@ -2,28 +2,48 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-# Apply seaborn style
-sns.set()
+num_of_samples_per_questions = 13
+num_of_responders = 22
+total_answers_per_question = num_of_samples_per_questions * num_of_responders
+Q1_correct = 252
+Q1_incorrect = total_answers_per_question - Q1_correct
+Q2_correct = 176
+Q2_the_same = 52
+Q2_incorrect = total_answers_per_question - Q2_correct - Q2_the_same
 
-# Example data
-Q1 = np.array([1, 1, 0.692307692, 1, 0.846153846, 0.769230769, 0.846153846, 1, 0.923076923, 0.769230769, 0.923076923, 1, 0.923076923, 0.615384615, 1, 1, 0.923076923, 0.692307692, 1, 0.846153846, 0.692307692, 0.923076923])
-Q2 = np.array([1, 0.692307692, 0.615384615, 1, 0.846153846, 0.846153846, 0.923076923, 0.923076923, 0.846153846, 0.923076923, 0.769230769, 0.923076923, 0.615384615, 0.461538462, 1, 0.769230769, 0.846153846, 0.923076923, 0.615384615, 0.615384615, 0.461538462, 0.923076923])
+# Pie chart labels
+labels = ['Ours', 'SD']
 
-# Calculate mean and std
-mean1, std1 = np.mean(Q1), np.std(Q1)
-mean2, std2 = np.mean(Q2), np.std(Q2)
+# Data for pie chart
+data = [Q1_correct, Q1_incorrect]
 
-print(f"Mean: Q1 - {mean1}, Q1 - {mean2}")
+# Plotting the pie chart
+fig, ax = plt.subplots()
+wedges, _, _ = ax.pie(data, autopct='%1.1f%%', startangle=90, colors=['#66b3ff','#ff9999'])
 
-# Create a barplot with means and error bars for std
-colors = sns.color_palette("deep")
-sns.set(style="whitegrid", font_scale=1.2)
-plt.figure(figsize=(10, 6))
-plt.bar(["Which image best matches the number\nof objects of the prompt?", "Which image is more natural?"], [mean1, mean2], yerr=[std1, std2], color=colors[:2], capsize=5)
-plt.title('Human Evaluation', fontsize=12)
-plt.ylabel("Mean score")
-plt.xticks(fontsize=14)
+ax.legend(wedges, labels, title="Responses", loc="best")
+
+ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
 
 # Show the plot
-plt.savefig('human_study.png', dpi=300, bbox_inches='tight')
+plt.savefig('human_study_q1.pdf', dpi=300, bbox_inches='tight')
+plt.show()
+
+
+# Pie chart labels
+labels = ['Ours', 'SD', 'The same']
+
+# Data for pie chart
+data = [Q2_correct, Q2_the_same, Q2_incorrect]
+
+# Plotting the pie chart
+fig, ax = plt.subplots()
+wedges, _, _ = ax.pie(data, autopct='%1.1f%%', startangle=90, colors=['#66b3ff','#ff9999', '#c2c2c2'])
+
+ax.legend(wedges, labels, title="Responses", loc="best")
+
+ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+
+# Show the plot
+plt.savefig('human_study_q2.pdf', dpi=300, bbox_inches='tight')
 plt.show()

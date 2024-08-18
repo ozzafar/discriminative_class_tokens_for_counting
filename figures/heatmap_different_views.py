@@ -3,8 +3,8 @@ import matplotlib.image as mpimg
 import matplotlib.patches as patches
 
 # Paths to your images
-image_path_1 = "../img/heatmap/17_15 oranges_6.0_heatmap.jpg"
-image_path_2 = "../img/heatmap/0_5 bottles_1.001953125_heatmap.jpg"
+image_path_1 = "../results/heatmap/17_15 oranges_6.0_heatmap.jpg"
+image_path_2 = "../results/heatmap/0_5 bottles_1.001953125_heatmap.jpg"
 
 # Captions for the images
 caption_1 = 'Top View'

@@ -7,5 +7,5 @@ token/
 /clip_count/clipcount_pretrained.ckpt
 /notebooks/discrimnative_tokens_for_ocr.ipynb
 /experiments/
-/yolov8n.pt
 /results/
+/yolov9c.pt

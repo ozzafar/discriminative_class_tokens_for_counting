@@ -18,18 +18,18 @@ and SD method; and (iii) it provides fine-grained user control. Through assessme
 of the generation of various objects, we demonstrate that our approach significantly
 enhances accuracy.
 >
-<a href="TODO"><img src="https://img.shields.io/badge/arXiv-2303.17155-b31b1b.svg" height=30.5></a>
+<a href="https://arxiv.org/abs/2408.11721"><img src="https://img.shields.io/badge/arXiv-2408.11721-b31b1b.svg" height=30.5></a> <a href="https://ozzafar.github.io/count_token/"><img src="https://img.shields.io/static/v1?label=Project&message=Website&color=red" height=30.5></a>
 
 
 <p align="center">
 <img src="https://github.com/ozzafar/discriminative_class_tokens_for_counting/blob/main/docs/results.png" width="800px"/>
 <br>
-We propose a technique that introduces a token ($S_c$) corresponding to an external target label count $c$. This improves text-to-image alignment to the prompt in the aspect of targeted number of objects.
+We propose a plug-and-play optimization of object counting accuracy of a text-to-image model based on detection models.
 </p>
 
-
-## TODO:
-- []  
+<p align="center">
+<img width="600px" src="https://github.com/ozzafar/discriminative_class_tokens_for_counting/blob/main/docs/method_diagram.pdf">
+</p>
 
 ## Installations:
 
@@ -59,9 +59,7 @@ Our evaluation is based both on CLIP-COUNT and YOLO.
 
 For CLIP-COUNT setup, refer to previous section.
 
-For YOLO setup, please refer to  [YOLOv8 docs](https://github.com/ultralytics/ultralytics).
-
-TODO - DINO ?
+For YOLO setup, please refer to  [YOLOv9 docs](https://docs.ultralytics.com/models/yolov9/).
 
 ## Run and Evaluate:
 <p align="center">
@@ -85,4 +83,14 @@ The script will create folders and store tokens representation in `token` and th
 
 If you make use of our work, please cite our paper:
 
-TODO
+```
+@misc{zafar2024iterativeobjectcountoptimization,
+      title={Iterative Object Count Optimization for Text-to-image Diffusion Models}, 
+      author={Oz Zafar and Lior Wolf and Idan Schwartz},
+      year={2024},
+      eprint={2408.11721},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2408.11721}, 
+}
+```

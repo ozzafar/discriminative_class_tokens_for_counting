@@ -27,10 +27,6 @@ enhances accuracy.
 We propose a plug-and-play optimization of object counting accuracy of a text-to-image model based on detection models.
 </p>
 
-<p align="center">
-<img width="600px" src="https://github.com/ozzafar/discriminative_class_tokens_for_counting/blob/main/docs/method_diagram.pdf">
-</p>
-
 ## Installations:
 
 #### Hugging face
